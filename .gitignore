@@ -1,0 +1,16 @@
+[Bb]in/
+[Oo]bj/
+.vs/
+TestResults/
+*.user
+*.suo
+
+/docs/internal/
+/.local/
+/artifacts/
+**/LENOZ_CAMERA_RELATORIO.md
+*.aep
+*.aepx
+
+.env
+.env.*
