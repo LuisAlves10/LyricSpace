@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Lenoz.Motion/Lenoz.Motion.csproj" />
+    <Project Path="src/LyricSpace.Studio/LyricSpace.Studio.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Lenoz.Motion.Tests/Lenoz.Motion.Tests.csproj" />
+  </Folder>
+</Solution>
