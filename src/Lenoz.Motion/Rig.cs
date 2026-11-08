@@ -25,7 +25,19 @@ public readonly record struct Pose(Vector3 Position, Vector3 RotationDegrees, Ve
     }
 }
 
-public readonly record struct RigNode(string Id, int? ParentIndex, Func<double, Pose> SampleLocal);
+public readonly record struct RigNode(string Id, int? ParentIndex, Func<double, Matrix4x4> MatrixAt)
+{
+    public RigNode(string id, int? parentIndex, Func<double, Pose> samplePose)
+        : this(id, parentIndex, Compose(samplePose))
+    {
+    }
+
+    private static Func<double, Matrix4x4> Compose(Func<double, Pose> samplePose)
+    {
+        ArgumentNullException.ThrowIfNull(samplePose);
+        return seconds => samplePose(seconds).LocalMatrix();
+    }
+}
 
 /// <summary>Compiled in parent-first order. Each evaluation writes to caller-owned storage.</summary>
 public sealed class Rig
@@ -39,7 +51,7 @@ public sealed class Rig
         for (int index = 0; index < _nodes.Length; index++)
         {
             RigNode node = _nodes[index];
-            if (string.IsNullOrWhiteSpace(node.Id) || !ids.Add(node.Id) || node.SampleLocal is null
+            if (string.IsNullOrWhiteSpace(node.Id) || !ids.Add(node.Id) || node.MatrixAt is null
                 || (node.ParentIndex is int parent && (parent < 0 || parent >= index)))
             {
                 throw new ArgumentException("Rig nodes need unique IDs, a pose sampler, and a preceding parent.", nameof(nodes));
@@ -48,6 +60,8 @@ public sealed class Rig
     }
 
     public int Count => _nodes.Length;
+
+    public RigNode GetNode(int index) => _nodes[index];
 
     public void Evaluate(double seconds, Span<Matrix4x4> world)
     {
@@ -59,7 +73,7 @@ public sealed class Rig
         for (int index = 0; index < _nodes.Length; index++)
         {
             RigNode node = _nodes[index];
-            Matrix4x4 local = node.SampleLocal(seconds).LocalMatrix();
+            Matrix4x4 local = node.MatrixAt(seconds);
             world[index] = node.ParentIndex is int parent ? local * world[parent] : local;
         }
     }
