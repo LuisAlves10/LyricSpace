@@ -28,13 +28,16 @@ internal static class DemoSequence
         var c = new Vector3(-3.4f, -0.07f, -13.0f);
         var firstTravel = new SpatialPath(a, b, new Vector3(-0.42f, 0.42f, -0.9f), new Vector3(-1.1f, -0.3f, 0.36f));
         var lastTravel = new SpatialPath(b, c, new Vector3(0.55f, -0.66f, -1.1f), new Vector3(1.5f, 0.25f, 1.1f));
-        var bridge = Progress(2.08, 3.88, 0.584244, 0.865033);
-        var traverse = Progress(5.04, 6.98, 0.53, 0.73);
-        int platform = Node("camera.travel", null, t =>
-        {
-            Vector3 position = t < 4.5 ? firstTravel.AtDistanceFraction(bridge.At(t)) : lastTravel.AtDistanceFraction(traverse.At(t));
-            return new Pose(position + new Vector3(0, 0, 9.2f));
-        });
+        var bridge = Progress(1.84, 4.81, 0.584244, 0.865033);
+        var traverse = Progress(4.42, 7.78, 0.63, 0.73);
+        int platform = Node("camera.traverse", null, t =>
+            new Pose(lastTravel.AtDistanceFraction(traverse.At(t)) - b + new Vector3(0, 0, 9.2f)));
+        int traverseBridge = Node("camera.bridge", platform, t => new Pose(firstTravel.AtDistanceFraction(bridge.At(t))));
+
+        var introTravel = new SpatialPath(new Vector3(0.26f, -0.20f, 0.48f), new Vector3(-0.08f, 0.18f, -0.24f),
+            new Vector3(-0.22f, 0.17f, -0.15f), new Vector3(0.17f, -0.09f, 0.24f));
+        var intro = Progress(0.16, 2.43, 0.52, 0.85);
+        int approach = Node("camera.approach", traverseBridge, t => new Pose(introTravel.AtDistanceFraction(intro.At(t))));
 
         var orbit = new ScalarCurve(
             new Key(0, -4, Out: new Ease(0.30)),
@@ -44,7 +47,7 @@ internal static class DemoSequence
             new Key(4.94, 0.6, new Ease(0.81), new Ease(0.17)),
             new Key(5.44, 8, new Ease(0.70), new Ease(0.30)),
             new Key(6.87, 0, new Ease(0.86)));
-        int aim = Node("camera.turn", platform, t => new Pose(Vector3.Zero, new Vector3(0, (float)orbit.At(t), 0)));
+        int aim = Node("camera.turn", approach, t => new Pose(Vector3.Zero, new Vector3(0, (float)orbit.At(t), 0)));
 
         const double depthStart = 1.93;
         const double depthStretch = 1.24;
@@ -65,9 +68,9 @@ internal static class DemoSequence
             new Key(8.6, -361.5, new Ease(0.9)));
         int lens = Node("camera.lens", impulse, t => new Pose(
             Vector3.Zero,
-            new Vector3(Wiggle.At(t, 2, 0.38f, seed, 1),
-                Wiggle.At(t, 2, 0.48f, seed, 2),
-                (float)roll.At(t) + Wiggle.At(t, 2, 0.38f, seed, 3))));
+            new Vector3(Wiggle.At(t, 2, 0.09f, seed, 1),
+                Wiggle.At(t, 2, 0.12f, seed, 2),
+                (float)roll.At(t) + Wiggle.At(t, 2, 0.09f, seed, 3))));
 
         var zoom = new ScalarCurve(
             new Key(0, 1320, Out: new Ease(0.2, 18)),
@@ -89,12 +92,19 @@ internal static class DemoSequence
         {
             var entry = Progress(enter, settle, 0.185, 0.92, velocity: 0.7);
             var departure = Progress(leave, exit, 0.87, 0.10);
-            return Node(id, null, t =>
+            int field = Node(id, null, t =>
             {
                 float leading = 1 - (float)entry.At(t);
                 float trailing = (float)departure.At(t);
                 return new Pose(origin + entryOffset * leading + exitOffset * trailing,
                     initialRotation * leading + endRotation * trailing);
+            });
+            var counterturn = Progress(settle - 0.38, Math.Min(Duration, leave + 0.24), 0.50, 0.92708);
+            Vector3 correction = new(-0.17f, 0.14f, -0.38f);
+            return Node(id + ".counterturn", field, t =>
+            {
+                float progress = 1 - (float)counterturn.At(t);
+                return new Pose(correction * progress, new Vector3(-3, 6, -5) * progress);
             });
         }
 
