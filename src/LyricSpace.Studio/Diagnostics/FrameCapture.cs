@@ -11,7 +11,7 @@ internal static class FrameCapture
     {
         const int width = 1280;
         const int height = 720;
-        const int fps = 30;
+        const int fps = 60;
         Directory.CreateDirectory(directory);
         if (Directory.EnumerateFiles(directory, "frame_*.png").Any())
         {

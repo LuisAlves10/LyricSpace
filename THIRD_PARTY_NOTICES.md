@@ -1,6 +1,6 @@
 # Avisos de terceiros
 
-Os termos abaixo se aplicam aos componentes de terceiros. O Studio usa Direct3D, DXGI, Direct2D, DirectWrite, D3DCompiler e as fontes instaladas pelo Windows. O build padrão depende do .NET Desktop Runtime do sistema. O build do Studio inclui este arquivo junto às suas DLLs.
+Os termos abaixo se aplicam aos componentes de terceiros. O Studio usa Direct3D, DXGI, DirectComposition, Direct2D, DirectWrite, D3DCompiler e as fontes instaladas pelo Windows. O build padrão depende do .NET Desktop Runtime do sistema. O build do Studio inclui este arquivo junto às suas DLLs.
 
 ## Application Insights
 
@@ -30,7 +30,7 @@ Microsoft.ApplicationInsights 2.23.0, transitivo do runner de testes. [Licença 
 
 ## Vortice.Windows
 
-Vortice.Direct3D11, Vortice.Direct2D1, Vortice.D3DCompiler, Vortice.DXGI e Vortice.DirectX 3.8.3 (runtime). [Licença na revisão de origem](https://github.com/amerkoleci/Vortice.Windows/blob/9e609cb9439c9872aa1b339f177e40ec96f77239/LICENSE).
+Vortice.Direct3D11, Vortice.Direct2D1, Vortice.D3DCompiler, Vortice.DirectComposition, Vortice.DXGI e Vortice.DirectX 3.8.3 (runtime). [Licença na revisão de origem](https://github.com/amerkoleci/Vortice.Windows/blob/9e609cb9439c9872aa1b339f177e40ec96f77239/LICENSE).
 
     The MIT License (MIT)
 

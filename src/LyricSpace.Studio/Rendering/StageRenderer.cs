@@ -2,10 +2,12 @@ using System.Numerics;
 using System.Runtime.InteropServices;
 using Lenoz.Motion;
 using LyricSpace.Studio.Composition;
+using LyricSpace.Studio.Overlay;
 using SharpGen.Runtime;
 using Vortice.D3DCompiler;
 using Vortice.Direct3D;
 using Vortice.Direct3D11;
+using Vortice.DirectComposition;
 using Vortice.DXGI;
 using Vortice.Mathematics;
 
@@ -23,6 +25,8 @@ internal sealed class StageRenderer : IDisposable
     private readonly IDXGISwapChain1? _swapChain;
     private readonly IDXGIAdapter3? _memoryAdapter;
     private readonly Sequence _sequence;
+    private OverlayLayout? _overlay;
+    private bool _editingOverlay;
     private readonly GpuTimer _timer;
     private readonly ID3D11VertexShader _quadShader;
     private readonly ID3D11VertexShader _screenShader;
@@ -30,6 +34,8 @@ internal sealed class StageRenderer : IDisposable
     private readonly ID3D11PixelShader _blendShader;
     private readonly ID3D11PixelShader _backdropShader;
     private readonly ID3D11PixelShader _exposureShader;
+    private readonly ID3D11PixelShader _overlayShader;
+    private readonly ID3D11PixelShader _shadowShader;
     private readonly ID3D11Buffer _constants;
     private readonly ID3D11SamplerState _sampler;
     private readonly ID3D11BlendState _blend;
@@ -47,9 +53,10 @@ internal sealed class StageRenderer : IDisposable
     private SampleTarget[]? _exposureTargets;
     private Viewport _viewport;
 
-    public StageRenderer(Sequence sequence, nint hwnd, int width, int height)
+    public StageRenderer(Sequence sequence, nint hwnd, int width, int height, OverlayLayout? overlay = null)
     {
         _sequence = sequence;
+        _overlay = overlay;
         _world = new Matrix4x4[sequence.Rig.Count];
         _visible = new DrawItem[sequence.Planes.Length];
 
@@ -71,7 +78,7 @@ internal sealed class StageRenderer : IDisposable
             if (hwnd != 0)
             {
                 using var factory = adapter.GetParent<IDXGIFactory2>();
-                _swapChain = Own(factory.CreateSwapChainForHwnd(_device, hwnd, new SwapChainDescription1
+                var description = new SwapChainDescription1
                 {
                     Width = (uint)width,
                     Height = (uint)height,
@@ -80,10 +87,26 @@ internal sealed class StageRenderer : IDisposable
                     BufferUsage = Usage.RenderTargetOutput,
                     BufferCount = 2,
                     Scaling = Scaling.Stretch,
-                    SwapEffect = SwapEffect.FlipDiscard,
-                    AlphaMode = AlphaMode.Ignore
-                }));
-                factory.MakeWindowAssociation(hwnd, WindowAssociationFlags.IgnoreAltEnter).CheckError();
+                    SwapEffect = overlay is null ? SwapEffect.FlipDiscard : SwapEffect.FlipSequential,
+                    AlphaMode = overlay is null ? AlphaMode.Ignore : AlphaMode.Premultiplied
+                };
+                if (overlay is not null)
+                {
+                    _swapChain = Own(factory.CreateSwapChainForComposition(_device, description));
+                    var composition = Own(DComp.DCompositionCreateDevice<IDCompositionDevice>(dxgiDevice));
+                    composition.CreateTargetForHwnd(hwnd, true, out IDCompositionTarget root).CheckError();
+                    Own(root);
+                    composition.CreateVisual(out IDCompositionVisual visual).CheckError();
+                    Own(visual);
+                    visual.SetContent(_swapChain).CheckError();
+                    root.SetRoot(visual).CheckError();
+                    composition.Commit().CheckError();
+                }
+                else
+                {
+                    _swapChain = Own(factory.CreateSwapChainForHwnd(_device, hwnd, description));
+                    factory.MakeWindowAssociation(hwnd, WindowAssociationFlags.IgnoreAltEnter).CheckError();
+                }
                 using var latencyDevice = _device.QueryInterface<IDXGIDevice1>();
                 latencyDevice.MaximumFrameLatency = 1;
             }
@@ -124,6 +147,8 @@ internal sealed class StageRenderer : IDisposable
             _blendShader = Own(_device.CreatePixelShader(Compile(shader, "BlendPS", "ps_5_0").Span));
             _backdropShader = Own(_device.CreatePixelShader(Compile(shader, "BackdropPS", "ps_5_0").Span));
             _exposureShader = Own(_device.CreatePixelShader(Compile(shader, "ExposurePS", "ps_5_0").Span));
+            _overlayShader = Own(_device.CreatePixelShader(Compile(shader, "OverlayPS", "ps_5_0").Span));
+            _shadowShader = Own(_device.CreatePixelShader(Compile(shader, "ShadowPS", "ps_5_0").Span));
             _constants = Own(_device.CreateConstantBuffer<DrawConstants>());
             _sampler = Own(_device.CreateSamplerState(new SamplerDescription(Filter.Anisotropic, TextureAddressMode.Clamp,
                 TextureAddressMode.Clamp, TextureAddressMode.Clamp, maxAnisotropy: 8)));
@@ -144,6 +169,7 @@ internal sealed class StageRenderer : IDisposable
     public string AdapterName { get; }
     public ulong GlyphBytes { get; }
     public ulong? LocalVideoMemory => _memoryAdapter?.QueryVideoMemoryInfo(0, MemorySegmentGroup.Local).CurrentUsage;
+    private Color4 ClearColor => _overlay is null ? Letterbox : new Color4(0, 0, 0, 0);
     public int Width { get; private set; }
     public int Height { get; private set; }
     public ID3D11Texture2D Output => _backBuffer ?? throw new InvalidOperationException("There is no render surface.");
@@ -179,21 +205,34 @@ internal sealed class StageRenderer : IDisposable
         Width = width;
         Height = height;
 
+        if (_overlay is { } layout)
+        {
+            _viewport = new Viewport(layout.Region.X, layout.Region.Y, layout.Region.Width, layout.Region.Height);
+            return;
+        }
+
         int videoWidth = Math.Min(width, (int)Math.Round(height * Sequence.Aspect));
         int videoHeight = Math.Min(height, (int)Math.Round(width / Sequence.Aspect));
         _viewport = new Viewport((width - videoWidth) / 2, (height - videoHeight) / 2, Math.Max(1, videoWidth), Math.Max(1, videoHeight));
     }
 
+    public void UpdateOverlayLayout(OverlayLayout layout, bool editing)
+    {
+        _overlay = layout;
+        _editingOverlay = editing;
+        Rectangle region = layout.Region;
+        _viewport = new Viewport(region.X, region.Y, region.Width, region.Height);
+    }
+
     public void Draw(double seconds, bool motionBlur, long frame, Action<GpuSample>? measure = null)
     {
         ID3D11RenderTargetView target = _target ?? throw new InvalidOperationException("There is no render target.");
-        if (motionBlur)
-        {
-            _exposureTargets ??= CreateExposureTargets();
-        }
-        else
+        int samples = motionBlur ? ExposureSamples : 1;
+        int targetCount = motionBlur || _overlay is not null ? samples : 0;
+        if ((_exposureTargets?.Length ?? 0) != targetCount)
         {
             ReleaseExposureTargets();
+            _exposureTargets = targetCount > 0 ? CreateExposureTargets(targetCount) : null;
         }
 
         if (measure is not null)
@@ -211,22 +250,35 @@ internal sealed class StageRenderer : IDisposable
         if (_exposureTargets is { } exposure)
         {
             // Three midpoint samples across a half-frame (180-degree) exposure.
-            double step = 0.5 / Sequence.ReferenceFps / ExposureSamples;
+            double step = 0.5 / Sequence.ReferenceFps / samples;
             for (int index = 0; index < exposure.Length; index++)
             {
-                double sampleTime = Math.Clamp(seconds + (index - 1) * step, 0, _sequence.Duration);
+                double sampleTime = Math.Clamp(seconds + (index - (samples - 1) * 0.5) * step, 0, _sequence.Duration);
                 DrawSample(exposure[index].Target, sampleTime);
             }
 
             _context.OMSetRenderTargets(target);
-            _context.ClearRenderTargetView(target, Letterbox);
+            _context.ClearRenderTargetView(target, ClearColor);
             _context.OMSetBlendState(null);
             _context.OMSetDepthStencilState(_noDepth);
-            _context.PSSetShaderResource(0, exposure[0].Resource);
-            _context.PSSetShaderResource(1, exposure[1].Resource);
-            _context.PSSetShaderResource(2, exposure[2].Resource);
-            DrawScreen(_exposureShader);
-            _context.PSUnsetShaderResources(0, ExposureSamples);
+            for (int index = 0; index < exposure.Length; index++)
+            {
+                _context.PSSetShaderResource((uint)index, exposure[index].Resource);
+            }
+
+            if (_overlay is { } layout)
+            {
+                Rectangle zone = layout.Region;
+                SetConstants(new DrawConstants(Matrix4x4.Identity, new Vector4(zone.Left, zone.Top, zone.Right, zone.Bottom),
+                    new Vector4(layout.Feather, samples, _editingOverlay ? 1 : 0, 0)));
+                DrawScreen(_overlayShader);
+            }
+            else
+            {
+                DrawScreen(_exposureShader);
+            }
+
+            _context.PSUnsetShaderResources(0, (uint)samples);
         }
         else
         {
@@ -246,25 +298,69 @@ internal sealed class StageRenderer : IDisposable
         return result == Result.Ok;
     }
 
-    public uint? PresentedCount => _swapChain is not null && _swapChain.GetFrameStatistics(out FrameStatistics stats) == Result.Ok
+    public uint? PresentedCount => _swapChain is not null && _swapChain.GetFrameStatistics(out Vortice.DXGI.FrameStatistics stats) == Result.Ok
         ? stats.PresentCount
         : null;
+
+    public IEnumerable<ProjectedWord> MeasureWords(double seconds)
+    {
+        _sequence.Rig.Evaluate(seconds, _world);
+        Matrix4x4 camera = _world[_sequence.CameraNode];
+        Matrix4x4 projection = ViewProjection(camera, seconds, Sequence.Aspect);
+        foreach (Drawable drawable in _planes)
+        {
+            if (drawable.ScenePlane.Text is not { Face: Typeface.Display } word)
+            {
+                continue;
+            }
+
+            Matrix4x4 transform = drawable.Size * _world[drawable.ScenePlane.Node] * projection;
+            Vector2 Project(float x, float y, out bool inFront)
+            {
+                Vector4 clip = Vector4.Transform(new Vector4(x, y, 0, 1), transform);
+                inFront = clip.W > 0.08f;
+                float inverseW = inFront ? 1 / clip.W : 0;
+                return new Vector2((0.5f + clip.X * inverseW * 0.5f) * Width, (0.5f - clip.Y * inverseW * 0.5f) * Height);
+            }
+
+            Vector2 center = Project(0, 0, out bool front);
+            var corners = new[]
+            {
+                Project(-0.5f, -0.5f, out bool front0),
+                Project(0.5f, -0.5f, out bool front1),
+                Project(0.5f, 0.5f, out bool front2),
+                Project(-0.5f, 0.5f, out bool front3)
+            };
+            float opacity = drawable.ScenePlane.Opacity(seconds);
+            bool visible = opacity >= 0.5f && front && front0 && front1 && front2 && front3
+                && center.X >= 0 && center.X <= Width && center.Y >= 0 && center.Y <= Height;
+            yield return new ProjectedWord(word.Text, opacity, visible, camera.Translation, center, corners);
+        }
+    }
+
+    private Matrix4x4 ViewProjection(Matrix4x4 world, double seconds, float aspect)
+    {
+        float fov = PerspectiveCamera.VerticalFovFromZoom(1080, (float)_sequence.Zoom.At(seconds));
+        return PerspectiveCamera.ViewProjection(world, fov, aspect, _sequence.NearPlane, _sequence.FarPlane);
+    }
 
     private void DrawSample(ID3D11RenderTargetView target, double seconds)
     {
         ID3D11DepthStencilView depth = _depth!;
-        _context.ClearRenderTargetView(target, Letterbox);
+        _context.ClearRenderTargetView(target, ClearColor);
         _context.ClearDepthStencilView(depth, DepthStencilClearFlags.Depth, 1, 0);
         _context.OMSetRenderTargets(target, depth);
         _context.OMSetBlendState(null);
         _context.OMSetDepthStencilState(_noDepth);
-        SetConstants(new DrawConstants(Matrix4x4.Identity, Vector4.Zero, new Vector4((float)_sequence.Temperature.At(seconds), 0, 0, 0)));
-        DrawScreen(_backdropShader);
+        if (_overlay is null)
+        {
+            SetConstants(new DrawConstants(Matrix4x4.Identity, Vector4.Zero, new Vector4((float)_sequence.Temperature.At(seconds), 0, 0, 0)));
+            DrawScreen(_backdropShader);
+        }
 
         _sequence.Rig.Evaluate(seconds, _world);
         var camera = _world[_sequence.CameraNode];
-        float fov = PerspectiveCamera.VerticalFovFromZoom(1080, (float)_sequence.Zoom.At(seconds));
-        Matrix4x4 projection = PerspectiveCamera.ViewProjection(camera, fov, Sequence.Aspect, 0.08f, 85);
+        Matrix4x4 projection = ViewProjection(camera, seconds, _viewport.Width / _viewport.Height);
         Vector3 viewAxis = new(camera.M31, camera.M32, camera.M33);
         int count = 0;
         for (int index = 0; index < _planes.Length; index++)
@@ -298,6 +394,19 @@ internal sealed class StageRenderer : IDisposable
 
         _context.OMSetDepthStencilState(_depthRead);
         _context.OMSetBlendState(_blend);
+        if (_overlay is not null)
+        {
+            _context.PSSetShader(_shadowShader);
+            for (int index = 0; index < count; index++)
+            {
+                DrawItem item = _visible[index];
+                if (_planes[item.Index].Mask is not null)
+                {
+                    DrawQuad(item, projection);
+                }
+            }
+        }
+
         _context.PSSetShader(_blendShader);
         for (int index = 0; index < count; index++)
         {
@@ -338,12 +447,12 @@ internal sealed class StageRenderer : IDisposable
     private static ReadOnlyMemory<byte> Compile(string shader, string entry, string profile)
         => Compiler.Compile(shader, entry, "Stage.hlsl", profile, ShaderFlags.OptimizationLevel3);
 
-    private SampleTarget[] CreateExposureTargets()
+    private SampleTarget[] CreateExposureTargets(int count)
     {
-        var targets = new List<SampleTarget>(ExposureSamples);
+        var targets = new List<SampleTarget>(count);
         try
         {
-            for (int index = 0; index < ExposureSamples; index++)
+            for (int index = 0; index < count; index++)
             {
                 using var surface = _device.CreateTexture2D(ColorFormat, (uint)Width, (uint)Height,
                     bindFlags: BindFlags.RenderTarget | BindFlags.ShaderResource);
@@ -444,3 +553,5 @@ internal sealed class StageRenderer : IDisposable
         }
     }
 }
+
+internal readonly record struct ProjectedWord(string Text, float Opacity, bool Visible, Vector3 Camera, Vector2 Center, Vector2[] Corners);

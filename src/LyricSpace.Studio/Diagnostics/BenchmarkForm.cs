@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using LyricSpace.Studio.Composition;
+using LyricSpace.Studio.Overlay;
 using LyricSpace.Studio.Playback;
 using LyricSpace.Studio.Rendering;
 
@@ -12,6 +13,7 @@ internal sealed class BenchmarkForm : Form
     private const double MeasurementSeconds = 20;
 
     private readonly Sequence _sequence;
+    private readonly OverlayLayout? _overlay;
     private readonly bool _motionBlur;
     private readonly string _output;
     private readonly StageSurface _surface = new() { Dock = DockStyle.Fill };
@@ -32,9 +34,10 @@ internal sealed class BenchmarkForm : Form
     private long _frame;
     private uint? _firstPresentCount;
 
-    public BenchmarkForm(Sequence sequence, bool motionBlur, string output)
+    public BenchmarkForm(Sequence sequence, bool motionBlur, string output, OverlayLayout? overlay = null)
     {
         _sequence = sequence;
+        _overlay = overlay;
         _motionBlur = motionBlur;
         _output = Path.GetFullPath(output);
         _recordGpu = sample =>
@@ -49,6 +52,15 @@ internal sealed class BenchmarkForm : Form
         FormBorderStyle = FormBorderStyle.None;
         StartPosition = FormStartPosition.Manual;
         Bounds = Screen.PrimaryScreen?.Bounds ?? new Rectangle(0, 0, 1920, 1080);
+        if (overlay is not null)
+        {
+            Text = "LyricSpace Overlay";
+            TopMost = true;
+            ShowInTaskbar = false;
+            AutoScaleMode = AutoScaleMode.None;
+            return;
+        }
+
         KeyPreview = true;
         Controls.Add(_surface);
         KeyDown += (_, e) =>
@@ -61,11 +73,31 @@ internal sealed class BenchmarkForm : Form
     }
 
     public bool Completed { get; private set; }
+    protected override bool ShowWithoutActivation => _overlay is not null;
+    protected override CreateParams CreateParams => _overlay is not null
+        ? InputTransparentWindow.Configure(base.CreateParams)
+        : base.CreateParams;
+
+    protected override void WndProc(ref Message message)
+    {
+        if (_overlay is null || !InputTransparentWindow.Handle(ref message))
+        {
+            base.WndProc(ref message);
+        }
+    }
 
     protected override void OnShown(EventArgs e)
     {
         base.OnShown(e);
-        _renderer = new StageRenderer(_sequence, _surface.Handle, _surface.Width, _surface.Height);
+        if (_overlay is not null)
+        {
+            _renderer = new StageRenderer(_sequence, Handle, Width, Height, _overlay);
+            InputTransparentWindow.Pin(Handle);
+        }
+        else
+        {
+            _renderer = new StageRenderer(_sequence, _surface.Handle, _surface.Width, _surface.Height);
+        }
         _started = FramePacer.Now;
         _pacer.Reset(_started);
         Application.Idle += OnIdle;
@@ -139,6 +171,7 @@ internal sealed class BenchmarkForm : Form
             Adapter = renderer.AdapterName,
             renderer.Width,
             renderer.Height,
+            Overlay = _overlay is not null,
             MotionBlur = _motionBlur,
             MeasurementSeconds = seconds,
             Submitted = _cpuTimes.Count,

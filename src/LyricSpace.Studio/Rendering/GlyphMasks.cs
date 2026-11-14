@@ -14,7 +14,7 @@ internal sealed class GlyphMasks(ID3D11Device device, ID3D11DeviceContext contex
     private const float Em = 288;
     private const float LayoutWidth = 4096;
     private const float LayoutHeight = 640;
-    private const int Padding = 8;
+    private const int Padding = 20;
     private readonly Dictionary<TextStyle, GlyphMask> _masks = new();
     private readonly ID2D1Factory _drawFactory = D2D1.D2D1CreateFactory<ID2D1Factory>();
     private readonly IDWriteFactory _textFactory = DWrite.DWriteCreateFactory<IDWriteFactory>();

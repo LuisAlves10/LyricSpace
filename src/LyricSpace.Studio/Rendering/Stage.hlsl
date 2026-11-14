@@ -81,3 +81,56 @@ float4 ExposurePS(Vertex input) : SV_Target
     float3 linearColor = (pow(a, 2.2) + pow(b, 2.2) + pow(c, 2.2)) / 3;
     return float4(pow(linearColor, 1.0 / 2.2), 1);
 }
+
+float4 ToLinearPremultiplied(float4 value)
+{
+    float3 straight = saturate(value.rgb / max(value.a, 1e-6));
+    return float4(pow(straight, 2.2) * value.a, value.a);
+}
+
+float4 OverlayPS(Vertex input) : SV_Target
+{
+    int3 pixel = int3(int2(input.Position.xy), 0);
+    float4 rgba = Image0.Load(pixel);
+    if (Parameters.y > 1)
+    {
+        float4 average = (ToLinearPremultiplied(rgba)
+            + ToLinearPremultiplied(Image1.Load(pixel))
+            + ToLinearPremultiplied(Image2.Load(pixel))) / 3;
+        float3 straight = saturate(average.rgb / max(average.a, 1e-6));
+        rgba = float4(pow(straight, 1.0 / 2.2) * average.a, average.a);
+    }
+
+    float2 distanceToEdge = min(input.Position.xy - Tint.xy, Tint.zw - input.Position.xy);
+    float feather = Parameters.x > 0
+        ? smoothstep(0, Parameters.x, min(distanceToEdge.x, distanceToEdge.y))
+        : 1;
+    float4 content = rgba * feather;
+    if (Parameters.z < 0.5)
+        return content;
+
+    float edge = min(distanceToEdge.x, distanceToEdge.y);
+    bool cornerGrip = max(distanceToEdge.x, distanceToEdge.y) < 20;
+    float guide = edge < 1.5 ? 0.64 : (cornerGrip && edge < 4 ? 0.85 : 0);
+    float4 border = float4(float3(0.40, 0.88, 1.0) * guide, guide);
+    return border + content * (1 - border.a);
+}
+
+
+float4 ShadowPS(Vertex input) : SV_Target
+{
+    // Work in screen pixels so the shadow retains its softness under perspective.
+    float2 stepX = ddx(input.UV);
+    float2 stepY = ddy(input.UV);
+    float2 center = input.UV - stepX * 0.8 - stepY * 1.85;
+    float2 dx = stepX * 2.8;
+    float2 dy = stepY * 2.8;
+    float blur = Image0.Sample(GlyphSampler, center).a * 0.32;
+    blur += 0.12 * (Image0.Sample(GlyphSampler, center - dx).a + Image0.Sample(GlyphSampler, center + dx).a
+                 + Image0.Sample(GlyphSampler, center - dy).a + Image0.Sample(GlyphSampler, center + dy).a);
+    blur += 0.05 * (Image0.Sample(GlyphSampler, center - dx - dy).a + Image0.Sample(GlyphSampler, center + dx - dy).a
+                 + Image0.Sample(GlyphSampler, center - dx + dy).a + Image0.Sample(GlyphSampler, center + dx + dy).a);
+    float alpha = blur * 0.86 * Tint.a * (1 - Image0.Sample(GlyphSampler, input.UV).a);
+    clip(alpha - 0.004);
+    return float4(float3(0.035, 0.026, 0.043) * alpha, alpha);
+}
