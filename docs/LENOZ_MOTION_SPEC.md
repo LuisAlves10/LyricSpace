@@ -37,7 +37,7 @@ fovY = 2 × atan(alturaDeReferência / (2 × zoom))
 clip = pontoLocal · mundo · view · projeção
 ```
 
-A rotação local e a orientação de base são matrizes separadas. Um pai de rotação constante muda o espaço dos filhos. A topologia tem IDs únicos e exige pais anteriores aos filhos. Um importador deverá verificar a ordem exata dos eixos e a mudança de base do AE em fixtures de mundo, além de implementar o ponto de interesse de uma câmera de dois nós. A projeção por Zoom e o deslocamento de câmera têm efeitos distintos sobre distância relativa e parallax. [Adobe, câmeras](https://helpx.adobe.com/after-effects/desktop/work-with-layers/camera-layer/cameras-lights-points-interest.html).
+A rotação local e a orientação de base são matrizes separadas. Um pai de rotação constante muda o espaço dos filhos. A topologia tem IDs únicos e exige pais anteriores aos filhos. A orientação do replay foi validada separadamente para os eixos e a câmera de dois nós do After Effects. Um importador geral ainda precisará tratar outras ordens, canais e tipos de layer. A projeção por Zoom e o deslocamento de câmera têm efeitos distintos sobre distância relativa e parallax. [Adobe, câmeras](https://helpx.adobe.com/after-effects/desktop/work-with-layers/camera-layer/cameras-lights-points-interest.html).
 
 ## Fases do movimento
 
@@ -66,4 +66,14 @@ O wiggle do AE foi observado na orientação, com seed 12345, frequência 2 e am
 
 Os dois pares do plugin auditado têm shutter interno 180° e seis amostras. O preview integra três amostras numa exposição equivalente de meio quadro. Usa máscaras de glifos com textura plana, mistura premultiplicada, fundo com gradiente e grão e elementos de profundidade. A comparação matemática cobre os canais locais selecionados e o overshoot antes e depois da expressão. O pipeline e a cena do AE têm peças adicionais.
 
-A fonte 3D aberta e o pré-render da composição principal divergem em acabamento e elementos visíveis. A auditoria registrou vínculos de expressão ausentes e valores opacos do Element. Os dados comprovam trajetórias locais, hierarquias, tempos, curvas e contribuições medidas. Matrizes mundiais subframe a subframe, paridade de efeitos e diagnóstico dos vínculos ausentes dependem de evidência adicional. [Medições e reprodução](STATUS.md).
+A fonte 3D aberta e o pré-render da composição principal divergem em acabamento e elementos visíveis. A auditoria registrou vínculos de expressão ausentes e valores opacos do Element. Os dados comprovam trajetórias locais, hierarquias, tempos, curvas e contribuições medidas. A equivalência das matrizes de mundo e da projeção foi medida nos frames inteiros da câmera. Subframes, paridade de efeitos e diagnóstico dos vínculos ausentes dependem de evidência adicional. [Medições e reprodução](STATUS.md).
+
+## Procedimento de referência nativa
+
+O replay usa os nulos #30 a #34 e a câmera #35, nos frames F212–429 da composição de ID 704. O leitor reconstrói a animação a partir dos keys e handles dos JSONs. A orientação do wiggle usa as amostras de 60 FPS com unwrap por eixo e interpola os intervalos fracionários. Os canais Euler explícitos mantêm os valores acumulados. O corte usa o mesmo tempo original, apenas normalizado para começar no segundo zero do replay.
+
+Na base do AE com X à direita, Y para baixo e câmera olhando em +Z, o teste validou a ordem Z → Y → X tanto na rotação quanto na orientação. Primeiro vêm pivô e escala, depois rotação explícita e orientação de base, depois posição. A câmera soma o referencial calculado pelo vetor do ponto de interesse após suas rotações e antes da translação. Cada filho multiplica sua matriz local pela matriz mundial do pai. A troca de base para o motor equivale a conjugar cada matriz por diag(1, −1, −1, 1).
+
+O script `tools/ae/ProbeCamera.jsx` espera um arquivo chamado `Referencia.aep` ao lado do script. Copie o script e uma cópia do projeto para `.local/ae-native` e confira os hashes antes de executar. Execute o script pelo After Effects em uma instância sem projeto aberto. Ele mede `toWorld` e `toWorldVec` de cada controle e `toComp` de três pontos fixos. A cópia é fechada sem salvar. Aponte `LYRICSPACE_AE_NATIVE` para o `ae-native-world.json` gerado e rode a categoria `LocalEvidence` com a pasta dos JSONs originais em `LYRICSPACE_AE_EVIDENCE`. Confira novamente o hash do original.
+
+A mesma câmera alimenta `--ae-reference` no app. A prova usa palavras próprias, fixas no espaço em três profundidades, para isolar a passagem da câmera. Três pontos fixos permitem medir a projeção independentemente do Element 3D. A perda de legibilidade nos giros da captura do replay é a passagem original da câmera nesse espaço; o overlay de uso geral usa uma sequência com janelas de leitura e continuidades ajustadas.
