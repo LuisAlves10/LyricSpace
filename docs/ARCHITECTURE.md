@@ -11,7 +11,10 @@ Comparação detalhada em [UPSTREAM_RESEARCH](UPSTREAM_RESEARCH.md). C++ com Dir
 ```mermaid
 flowchart LR
   P[Transporte do Studio] --> T[Tempo local em segundos]
-  D[DemoSequence] --> R[Rig, curvas e planos]
+  S[GSMTC] --> T
+  S --> L[LRCLIB e cache LRC]
+  L --> D[Compositor procedural ou demo no Studio]
+  D --> R[Rig, curvas e planos]
   T --> E[Avaliação do Lenoz Motion Engine]
   R --> E
   E --> C[View e projeção]
@@ -28,9 +31,9 @@ flowchart LR
 | Lenoz Motion Engine | `src/Lenoz.Motion`, independente de Windows, relógio e GPU. Avalia curvas, caminhos, rig, wiggle e oscilação usando segundos absolutos. |
 | Camera Engine | O rig produz a matriz de mundo da câmera. `PerspectiveCamera` calcula a view inversa e a projeção. Dolly, rotação e FOV são canais independentes. |
 | Typography Engine | `GlyphMasks` forma uma linha com fonte do sistema e cache por texto, face e tracking. `ScenePlane` retém tamanho em mundo, cor e vínculo ao rig. |
-| Procedural Composer | `DemoSequence` gera uma cena a partir de poses, caminhos, fase, opacidade e seed. A demo tem três grupos autorais com tempos locais. Escolha automática de layout ou preset para letras arbitrárias é uma etapa futura. |
-| Audio Sync | Futuro adaptador de sessão e relógio monotônico. Fornecerá ID da faixa, duração, posição, velocidade, estado e descontinuidade de seek. Análise musical será uma fonte separada de eventos temporais. |
-| Lyrics Provider | Futuro provedor que recebe metadados e retorna cues normalizados por linha e, quando disponíveis, por palavra. Busca, cache, cancelamento e escolha de faixa ficam fora do thread gráfico. |
+| Procedural Composer | `ProceduralSong` distribui frases em estações XYZ, com layouts determinados pela seed, ênfase em uma linha visual, curvas sobrepostas e uma câmera comum. `DemoSequence` continua disponível no Studio. |
+| Audio Sync | `LivePlayback` seleciona a sessão GSMTC e converte posição, carimbo e velocidade em uma âncora monotônica. Para o Spotify desktop, NAudio lê o estado da sessão de áudio local se o player publicar `Playing` durante uma pausa. |
+| Lyrics Provider | `LrclibLyrics` tenta a gravação exata, consulta a busca e compara título, artista, duração e álbum. O parser LRC preserva offsets, múltiplas marcas e intervalos em branco. A busca e o cache ficam no worker. |
 | Windows Overlay | Host preferencial. Swap chain de composição com alfa premultiplicado, visual DirectComposition em janela layered topmost, saída transparente e feather aplicado ao RGBA composto. Sombra por glifo em pixels de tela. |
 | AE Bridge | O leitor de referência reproduz apenas a cadeia de câmera da auditoria. O bridge geral continuará sendo um importador declarativo para canais, IDs, parents e eixos. O teste usa também matrizes e projeções medidas no AE. |
 | Studio | WinForms, relógio de preview, seek, taxa, reinício e métricas. A captura fora da janela e o benchmark instanciam o mesmo renderizador. |
@@ -43,11 +46,15 @@ flowchart LR
 - O relógio é independente do refresh. O Studio espera mensagens do Windows ou o próximo deadline pelo timer de alta resolução e usa `Present(1)`. A sequência avança pelo tempo real, mesmo que um quadro atrase. Ao pausar, só redesenha após alterações e exposições de janela.
 - O benchmark mede cadência de submissões, tempos de preparação e `Present` separados, consultas D3D11 de timestamps não blocantes, working set e uso local registrado pelo DXGI. O valor de memória inclui outros recursos do processo alocados pelo driver. [QueryVideoMemoryInfo](https://learn.microsoft.com/en-us/windows/win32/api/dxgi1_4/nf-dxgi1_4-idxgiadapter3-queryvideomemoryinfo).
 
+## Reprodução automática
+
+O worker consulta a sessão do Windows a cada 250 ms e confirma a identidade da faixa em amostras consecutivas antes de consultar letras. Uma faixa nova invalida o quadro e cancela a consulta anterior. A posição é projetada pelo tempo monotônico local e um snapshot mais novo pode reposicionar a cena inclusive para trás. Quando uma sessão Spotify local previamente ativa fica inativa com GSMTC ainda em `Playing`, o relógio congela entre as duas amostras observadas. A retomada continua dessa âncora até chegar um carimbo novo. O fallback lê estado do stream WASAPI e dispensa amostragem de áudio. [Timeline GSMTC](https://learn.microsoft.com/en-us/uwp/api/windows.media.control.globalsystemmediatransportcontrolssessiontimelineproperties) · [Estado da sessão de áudio](https://learn.microsoft.com/en-us/windows/win32/api/audiosessiontypes/ne-audiosessiontypes-audiosessionstate).
+
+LRCLIB usa HTTPS identificado, com prazo limite, cancelamento e respeito a `Retry-After`. O cache de até 256 registros hashados grava em arquivo temporário e troca atomicamente. Acertos duram 30 dias, ausências confirmadas duram 20 minutos e erros transitórios permitem nova tentativa. O compositor prepara curvas no worker. O render usa blocos de quatro cues com vizinhos, reutiliza o dispositivo e retém apenas as máscaras do bloco atual. A animação para de apresentar quadros em regiões sem texto e durante pausa. [Documentação do LRCLIB](https://lrclib.net/docs.txt).
+
 ## Integrações planejadas
 
-O relógio aceita snapshots de GSMTC e converte a posição e a idade do snapshot para uma âncora monotônica. Em pausa e após seek, o novo snapshot substitui a estimativa. Use LRC local e LRCLIB por meio de um contrato único. Faça a seleção por título, artista, álbum e duração e mantenha offsets do usuário por faixa. Timestamps de palavra só habilitam destaque por palavra quando presentes na fonte. [Timeline GSMTC](https://learn.microsoft.com/en-us/uwp/api/windows.media.control.globalsystemmediatransportcontrolssessiontimelineproperties), [LRCLIB](https://lrclib.net/docs).
-
-Spotify, Apple Music e players de YouTube Music são inicialmente candidatos a sessão GSMTC, sujeitos à qualidade da timeline exposta em cada cliente. Um adaptador oficial dedicado depende das permissões, capacidades, termos e disponibilidade do player. A política de desenvolvedores do Spotify tem condições específicas sobre sincronizar seu conteúdo com mídia visual. [Spotify Developer Policy](https://developer.spotify.com/policy), [MusicKit](https://developer.apple.com/musickit/), [YouTube IFrame API](https://developers.google.com/youtube/iframe_api_reference).
+A primeira integração foi verificada no Spotify desktop. Apple Music e YouTube Music são candidatos a sessão GSMTC, sujeitos à qualidade da timeline publicada por cada cliente. Um adaptador oficial dedicado depende das permissões, capacidades, termos e disponibilidade do player. A política de desenvolvedores do Spotify tem condições específicas sobre sincronizar seu conteúdo com mídia visual. [Spotify Developer Policy](https://developer.spotify.com/policy), [MusicKit](https://developer.apple.com/musickit/), [YouTube IFrame API](https://developers.google.com/youtube/iframe_api_reference).
 
 WASAPI loopback é candidato para análise de intensidade, transientes e batidas. Use blocos pequenos com carimbo temporal e análise fora do render. Valide a mudança de saída, latência e mistura de sons do sistema antes de usar esses sinais como fonte de timing. [Microsoft WASAPI loopback](https://learn.microsoft.com/en-us/windows/win32/coreaudio/loopback-recording).
 

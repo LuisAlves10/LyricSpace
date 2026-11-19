@@ -24,7 +24,8 @@ internal sealed class StageRenderer : IDisposable
     private readonly ID3D11DeviceContext _context;
     private readonly IDXGISwapChain1? _swapChain;
     private readonly IDXGIAdapter3? _memoryAdapter;
-    private readonly Sequence _sequence;
+    private Sequence _sequence = null!;
+    private readonly GlyphMasks _masks;
     private OverlayLayout? _overlay;
     private bool _editingOverlay;
     private readonly GpuTimer _timer;
@@ -43,9 +44,9 @@ internal sealed class StageRenderer : IDisposable
     private readonly ID3D11DepthStencilState _depthRead;
     private readonly ID3D11DepthStencilState _noDepth;
     private readonly ID3D11RasterizerState _rasterizer;
-    private readonly Matrix4x4[] _world;
-    private readonly Drawable[] _planes;
-    private readonly DrawItem[] _visible;
+    private Matrix4x4[] _world = [];
+    private Drawable[] _planes = [];
+    private DrawItem[] _visible = [];
 
     private ID3D11Texture2D? _backBuffer;
     private ID3D11RenderTargetView? _target;
@@ -55,10 +56,7 @@ internal sealed class StageRenderer : IDisposable
 
     public StageRenderer(Sequence sequence, nint hwnd, int width, int height, OverlayLayout? overlay = null)
     {
-        _sequence = sequence;
         _overlay = overlay;
-        _world = new Matrix4x4[sequence.Rig.Count];
-        _visible = new DrawItem[sequence.Planes.Length];
 
         try
         {
@@ -112,30 +110,8 @@ internal sealed class StageRenderer : IDisposable
             }
 
             _timer = Own(new GpuTimer(_device, _context));
-            var masks = Own(new GlyphMasks(_device, _context));
-            _planes = new Drawable[sequence.Planes.Length];
-            ulong glyphBytes = 0;
-            var styles = new HashSet<TextStyle>();
-            for (int index = 0; index < _planes.Length; index++)
-            {
-                ScenePlane ScenePlane = sequence.Planes[index];
-                GlyphMask? mask = ScenePlane.Text is { } text ? masks.Get(text) : null;
-                if (ScenePlane.Text is { } style && mask is { } glyph && styles.Add(style))
-                {
-                    glyphBytes += glyph.Bytes;
-                }
-
-                Vector2 size = ScenePlane.Size;
-                if (mask is { } m)
-                {
-                    size.Y *= m.PaddingScale;
-                    size.X = size.Y * m.Aspect;
-                }
-
-                _planes[index] = new Drawable(ScenePlane, Matrix4x4.CreateScale(size.X, size.Y, 1), mask?.View);
-            }
-
-            GlyphBytes = glyphBytes;
+            _masks = Own(new GlyphMasks(_device, _context));
+            SetSequence(sequence);
             using var shaderStream = typeof(StageRenderer).Assembly.GetManifestResourceStream("LyricSpace.Studio.Rendering.Stage.hlsl")
                 ?? throw new InvalidOperationException("The stage shader resource is missing.");
             using var reader = new StreamReader(shaderStream);
@@ -167,7 +143,7 @@ internal sealed class StageRenderer : IDisposable
     }
 
     public string AdapterName { get; }
-    public ulong GlyphBytes { get; }
+    public ulong GlyphBytes { get; private set; }
     public ulong? LocalVideoMemory => _memoryAdapter?.QueryVideoMemoryInfo(0, MemorySegmentGroup.Local).CurrentUsage;
     private Color4 ClearColor => _overlay is null ? Letterbox : new Color4(0, 0, 0, 0);
     public int Width { get; private set; }
@@ -175,6 +151,44 @@ internal sealed class StageRenderer : IDisposable
     public ID3D11Texture2D Output => _backBuffer ?? throw new InvalidOperationException("There is no render surface.");
     public ID3D11Device Device => _device;
     public ID3D11DeviceContext Context => _context;
+
+    public void SetSequence(Sequence sequence)
+    {
+        if (ReferenceEquals(_sequence, sequence))
+        {
+            return;
+        }
+
+        var styles = sequence.Planes.Where(plane => plane.Text.HasValue)
+            .Select(plane => plane.Text!.Value).ToHashSet();
+        _masks.Retain(styles);
+        _sequence = sequence;
+        _world = new Matrix4x4[sequence.Rig.Count];
+        _visible = new DrawItem[sequence.Planes.Length];
+        _planes = new Drawable[sequence.Planes.Length];
+
+        for (int index = 0; index < _planes.Length; index++)
+        {
+            ScenePlane plane = sequence.Planes[index];
+            GlyphMask? mask = plane.Text is { } text ? _masks.Get(text) : null;
+            Vector2 size = plane.Size;
+            if (mask is { } glyph)
+            {
+                float height = size.X > 0 ? MathF.Min(size.Y, size.X / (glyph.PaddingScale * glyph.Aspect)) : size.Y;
+                size.Y = height * glyph.PaddingScale;
+                size.X = size.Y * glyph.Aspect;
+            }
+
+            if (plane.Text.HasValue && mask is null)
+            {
+                plane = plane with { Opacity = _ => 0 };
+            }
+
+            _planes[index] = new Drawable(plane, Matrix4x4.CreateScale(size.X, size.Y, 1), mask?.View);
+        }
+
+        GlyphBytes = _masks.Bytes;
+    }
 
     public void Resize(int width, int height)
     {

@@ -2,6 +2,7 @@ using System.Globalization;
 using LyricSpace.Studio.Composition;
 using LyricSpace.Studio.Diagnostics;
 using LyricSpace.Studio.Overlay;
+using LyricSpace.Studio.Playback;
 
 namespace LyricSpace.Studio;
 
@@ -16,6 +17,8 @@ internal static class Program
             uint seed = DemoSequence.DefaultSeed;
             bool motionBlur = true;
             bool studio = false;
+            bool demo = false;
+            string? mediaLog = null;
             bool loop = false;
             string? capture = null;
             string? benchmark = null;
@@ -51,6 +54,12 @@ internal static class Program
                         break;
                     case "--feather":
                         feather = float.Parse(Argument(args, ref index), CultureInfo.InvariantCulture);
+                        break;
+                    case "--demo":
+                        demo = true;
+                        break;
+                    case "--media-log":
+                        mediaLog = Argument(args, ref index);
                         break;
                     case "--studio":
                         studio = true;
@@ -104,7 +113,10 @@ internal static class Program
                     return form.Completed ? 0 : 1;
                 }
 
-                using var overlay = new OverlayWindow(sequence, motionBlur, loop, screen, layout);
+                using var live = demo || loop || evidence is not null ? null : new LivePlayback(
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LyricSpace", "lyrics-cache"),
+                    seed, mediaLog);
+                using var overlay = new OverlayWindow(sequence, motionBlur, loop, screen, layout, live);
                 Application.Run(overlay);
             }
 

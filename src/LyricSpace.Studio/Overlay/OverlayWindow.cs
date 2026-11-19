@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
+using Lenoz.Motion;
 using LyricSpace.Studio.Composition;
 using LyricSpace.Studio.Playback;
 using LyricSpace.Studio.Rendering;
@@ -8,7 +9,17 @@ namespace LyricSpace.Studio.Overlay;
 
 internal sealed class OverlayWindow : Form
 {
+    private static readonly Sequence EmptyScene = new(
+        new Rig(new RigNode("camera", null, _ => new Pose(new System.Numerics.Vector3(0, 0, 9)))),
+        0, new ScalarCurve(new Key(0, 1390)), new ScalarCurve(new Key(0, 0)), [], 1);
     private readonly Sequence _sequence;
+    private readonly LivePlayback? _live;
+    private readonly System.Windows.Forms.Timer? _wake;
+    private readonly NotifyIcon? _tray;
+    private readonly ContextMenuStrip? _trayMenu;
+    private Sequence? _renderedScene;
+    private double _lastTime = double.NaN;
+    private bool _dirty;
     private readonly bool _motionBlur;
     private readonly bool _loop;
     private readonly Rectangle _display;
@@ -21,9 +32,18 @@ internal sealed class OverlayWindow : Form
     private double _start;
     private long _frame;
 
-    public OverlayWindow(Sequence sequence, bool motionBlur, bool loop, Rectangle display, OverlayLayout layout)
+    public OverlayWindow(Sequence sequence, bool motionBlur, bool loop, Rectangle display, OverlayLayout layout, LivePlayback? live)
     {
-        _sequence = sequence;
+        _sequence = live is null ? sequence : EmptyScene;
+        _live = live;
+        if (live is not null)
+        {
+            _wake = new System.Windows.Forms.Timer { Interval = 40 };
+            _wake.Tick += Render;
+            _trayMenu = new ContextMenuStrip();
+            _trayMenu.Items.Add("Sair do LyricSpace", null, (_, _) => Close());
+            _tray = new NotifyIcon { Icon = SystemIcons.Application, Text = "LyricSpace", ContextMenuStrip = _trayMenu };
+        }
         _motionBlur = motionBlur;
         _loop = loop;
         _layout = layout;
@@ -55,6 +75,11 @@ internal sealed class OverlayWindow : Form
         InputTransparentWindow.Pin(Handle);
         _start = FramePacer.Now;
         _pacer.Reset(_start);
+        if (_tray is not null)
+        {
+            _tray.Visible = true;
+        }
+
         Application.Idle += Render;
     }
 
@@ -69,6 +94,17 @@ internal sealed class OverlayWindow : Form
             }
 
             Edit(now);
+            if (_live is not null)
+            {
+                if (!RenderLive(now))
+                {
+                    return;
+                }
+
+                _pacer.Advance(now);
+                continue;
+            }
+
             double time = (_editingSince ?? now) - _start;
             if (!_loop && time > _sequence.Duration)
             {
@@ -82,6 +118,38 @@ internal sealed class OverlayWindow : Form
         }
     }
 
+    private bool RenderLive(double now)
+    {
+        LiveFrame? playback = _live!.Frame;
+        double time = playback?.Clock.At(now) ?? 0;
+        ProceduralSong? song = playback?.Song;
+        Sequence scene = song?.CanRender(time) == true ? song.SceneAt(time)! : EmptyScene;
+        if (scene == EmptyScene)
+        {
+            time = 0;
+        }
+
+        string status = _live.TrayStatus;
+        if (_tray!.Text != status)
+        {
+            _tray.Text = status;
+        }
+
+        if (!ReferenceEquals(_renderedScene, scene) || time != _lastTime || _dirty)
+        {
+            _renderer!.SetSequence(scene);
+            _renderer.Draw(time, _motionBlur, _frame++);
+            _renderer.Present();
+            _renderedScene = scene;
+            _lastTime = time;
+            _dirty = false;
+        }
+
+        bool moving = _editingSince is not null || (scene != EmptyScene && playback?.Clock.Rate > 0 && time < playback.Clock.Duration);
+        _wake!.Enabled = !moving;
+        return moving;
+    }
+
     private void Edit(double now)
     {
         if (OverlayEditor.ChordHeld)
@@ -92,12 +160,14 @@ internal sealed class OverlayWindow : Form
                 _originalRegion = _layout.Region;
                 _editor.Begin(_originalRegion);
                 _editingSince = now;
+                _dirty = true;
             }
 
             Rectangle region = _editor!.ReadDrag();
             if (region != _layout.Region)
             {
                 _layout = _layout.At(region);
+                _dirty = true;
             }
 
             _renderer!.UpdateOverlayLayout(_layout, editing: true);
@@ -107,6 +177,7 @@ internal sealed class OverlayWindow : Form
             _editor!.End();
             _start += now - started;
             _editingSince = null;
+            _dirty = true;
             _renderer!.UpdateOverlayLayout(_layout, editing: false);
             if (_layout.Region != _originalRegion)
             {
@@ -120,6 +191,9 @@ internal sealed class OverlayWindow : Form
         if (disposing)
         {
             Application.Idle -= Render;
+            _wake?.Dispose();
+            _tray?.Dispose();
+            _trayMenu?.Dispose();
             _editor?.Dispose();
             _renderer?.Dispose();
             _pacer.Dispose();

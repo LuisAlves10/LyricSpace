@@ -1,6 +1,17 @@
 # Status
 
-## Overlay
+## Spotify e composição procedural
+
+O overlay acompanha uma sessão GSMTC por padrão. A letra por linha vem do LRCLIB e o cache persistente evita repetir buscas em faixas já ouvidas. O ícone na bandeja informa o estado e encerra o app. A demo autoral continua acessível por `--demo` e pelo Studio.
+
+- **Reprodução real.** Validação na instalação desktop do Spotify com múltiplas faixas, incluindo *cardigan*, *Nervous* e *Reflections*. Foram observados carregamento das letras, troca de faixa, pausa, retomada e seeks nas duas direções. Em *Reflections*, o relógio congelou perto de 42 s e o seek em pausa fixou a posição em 65,000 s. A retomada partiu dessa posição. Os seeks em reprodução levaram cerca de 0,36–0,49 s para aparecer no log. O seek em pausa levou cerca de 2,87 s até o Spotify publicar a nova posição.
+- **Fallback local.** O teste reproduziu Spotify com áudio parado e estado GSMTC ainda em `Playing`. A integração usa a transição de estado WASAPI do processo Spotify com NAudio. Quando o player ainda reporta uma amostra antiga, a posição é aproximada até que ele publique a âncora atual. O resultado depende do cliente e do timestamp que ele expõe.
+- **Movimento.** Testes conferem seed, seek determinístico, continuidade da câmera nas trocas de bloco e overlap de duas frases. Um trecho real carregado pelo LRCLIB foi renderizado pelo Studio em 671 quadros a 60 FPS. A gravação e o trace de projeção ficam em `artifacts/`.
+- **Custo gráfico.** Render fora da tela a 1920 × 1080 na Radeon RX 570, com o caminho transparente e blur de três amostras. Em 589 amostras válidas, a GPU teve mediana de 1,86 ms e p95 de 2,48 ms. A cena usou 11,25 MiB de máscaras. A sessão do Windows estava bloqueada, o que impediu validar a apresentação do novo fluxo sobre a área de trabalho. Os números são do render GPU.
+- **Testes.** Restore bloqueado, build Release e 31 testes aprovados, incluindo o replay do After Effects com evidência local. Letras, logs de reprodução, capturas e build executável ficam no computador.
+- **Limites atuais.** A sincronização é por linha. A cobertura depende do LRCLIB, a precisão depende do relógio do player e a primeira leitura pode levar alguns segundos. Outros players e o comportamento em jogos seguem pendentes de validação específica.
+
+## Overlay anterior à integração
 
 O executável começa pelo overlay DirectComposition. O Studio abre com `--studio`. O overlay compõe texto com alfa por pixel, sombra suave, motion blur e feather. A região padrão está no canto inferior direito e mede cerca de 806 × 453 px em 1080p. Para ajustar, segure Ctrl + Shift + Alt. Arraste por dentro da região para mover. Puxe um canto para redimensionar mantendo a proporção. Ao soltar, a moldura e a janela de edição somem, a cena retoma e a região é salva localmente.
 

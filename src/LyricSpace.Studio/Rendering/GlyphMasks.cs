@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Numerics;
 using LyricSpace.Studio.Composition;
 using Vortice.DCommon;
@@ -15,33 +16,45 @@ internal sealed class GlyphMasks(ID3D11Device device, ID3D11DeviceContext contex
     private const float LayoutWidth = 4096;
     private const float LayoutHeight = 640;
     private const int Padding = 20;
-    private readonly Dictionary<TextStyle, GlyphMask> _masks = new();
+    private readonly Dictionary<TextStyle, GlyphMask?> _masks = new();
     private readonly ID2D1Factory _drawFactory = D2D1.D2D1CreateFactory<ID2D1Factory>();
     private readonly IDWriteFactory _textFactory = DWrite.DWriteCreateFactory<IDWriteFactory>();
 
-    public GlyphMask Get(TextStyle style)
+    public ulong Bytes => _masks.Values.Aggregate(0UL, (sum, mask) => sum + (mask?.Bytes ?? 0));
+
+    public void Retain(HashSet<TextStyle> active)
     {
-        if (_masks.TryGetValue(style, out GlyphMask existing))
+        foreach (TextStyle style in _masks.Keys.Where(style => !active.Contains(style)).ToArray())
+        {
+            _masks.Remove(style, out GlyphMask? removed);
+            removed?.View.Dispose();
+        }
+    }
+
+    public GlyphMask? Get(TextStyle style)
+    {
+        if (_masks.TryGetValue(style, out GlyphMask? existing))
         {
             return existing;
         }
 
-        GlyphMask mask = Create(style);
+        GlyphMask? mask = Create(style);
         _masks.Add(style, mask);
         return mask;
     }
 
-    private GlyphMask Create(TextStyle style)
+    private GlyphMask? Create(TextStyle style)
     {
+        float em = Math.Min(Em, 3300f / Math.Max(1, new StringInfo(style.Text).LengthInTextElements));
         using IDWriteTextFormat format = style.Face == Typeface.Display
-            ? _textFactory.CreateTextFormat("Arial", FontWeight.Black, Vortice.DirectWrite.FontStyle.Normal, Em)
-            : _textFactory.CreateTextFormat("Bahnschrift", FontWeight.SemiBold, Vortice.DirectWrite.FontStyle.Normal, FontStretch.SemiCondensed, Em);
+            ? _textFactory.CreateTextFormat("Arial", FontWeight.Black, Vortice.DirectWrite.FontStyle.Normal, em)
+            : _textFactory.CreateTextFormat("Bahnschrift", FontWeight.SemiBold, Vortice.DirectWrite.FontStyle.Normal, FontStretch.SemiCondensed, em);
         format.WordWrapping = WordWrapping.NoWrap;
 
         using IDWriteTextLayout layout = _textFactory.CreateTextLayout(style.Text, format, LayoutWidth, LayoutHeight);
         using (var spacing = layout.QueryInterface<IDWriteTextLayout1>())
         {
-            float halfTracking = Em * style.Tracking * 0.5f;
+            float halfTracking = em * style.Tracking * 0.5f;
             spacing.SetCharacterSpacing(halfTracking, halfTracking, 0, new TextRange(0, (uint)style.Text.Length));
         }
 
@@ -50,7 +63,7 @@ internal sealed class GlyphMasks(ID3D11Device device, ID3D11DeviceContext contex
         float inkHeight = LayoutHeight + bounds.Top + bounds.Bottom;
         if (!(inkWidth > 0 && inkWidth <= LayoutWidth && inkHeight > 0 && inkHeight <= LayoutHeight))
         {
-            throw new InvalidOperationException("Text is outside the supported single-line glyph mask bounds.");
+            return null;
         }
 
         uint width = (uint)MathF.Ceiling(inkWidth) + Padding * 2;
@@ -99,9 +112,9 @@ internal sealed class GlyphMasks(ID3D11Device device, ID3D11DeviceContext contex
 
     public void Dispose()
     {
-        foreach (GlyphMask mask in _masks.Values)
+        foreach (GlyphMask? mask in _masks.Values)
         {
-            mask.View.Dispose();
+            mask?.View.Dispose();
         }
 
         _masks.Clear();
