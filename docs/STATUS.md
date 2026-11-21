@@ -1,5 +1,13 @@
 # Status
 
+## Linguagem visual e leitura
+
+- **Overlay real.** Gravação contínua de 21 s a 60 FPS de *I Was Never There* tocando no Spotify desktop. A região de 806 × 454 px ficou sobre uma janela de teste clara e escura. O preset branco monocromático usou o modo estimado. O caminho de Enhanced LRC foi verificado separadamente com uma letra de teste e timestamps explícitos.
+- **Margens.** Em 1.177 amostras de leitura de uma letra real a 806 × 454 px, a menor folga além da área reservada foi de 1,93 px. A região mínima de 240 × 135 px teve 699 amostras de leitura de um trecho com palavras cronometradas e folga mínima de 0,40 px. As travessias e saídas passaram além dessa margem de propósito. O trace considera contorno, tracking, escala, rotações locais e câmera.
+- **Desempenho.** Benchmark de 20 s com alvo 1920 × 1080, região de 806 × 454 px, RX 570, blur de três amostras e preset branco. Foram 59,90 FPS de submissão, com p95 de 17,10 ms no intervalo entre quadros e 3,20 ms de GPU. O maior intervalo observado foi 48,04 ms. Preparar o próximo bloco em amortização reduziu o pico de CPU de submissão de 63,22 para 5,33 ms nas duas medições.
+- **Testes.** 36 testes aprovados com evidência local do AE. A cobertura nova inclui Enhanced LRC, estimativa opcional, entrada por vocal, tracking durante leitura, variação determinística e projeção dentro da margem.
+- **Cobertura de letras.** O LRCLIB costuma fornecer tempos por linha. O modo estimado é opcional. A precisão por palavra depende do Enhanced LRC da faixa. Regiões muito pequenas com letras densas exigem fonte menor. O cache, as amostras de letra e os vídeos permanecem locais.
+
 ## Spotify e composição procedural
 
 O overlay acompanha uma sessão GSMTC por padrão. A letra por linha vem do LRCLIB e o cache persistente evita repetir buscas em faixas já ouvidas. O ícone na bandeja informa o estado e encerra o app. A demo autoral continua acessível por `--demo` e pelo Studio.
@@ -9,7 +17,7 @@ O overlay acompanha uma sessão GSMTC por padrão. A letra por linha vem do LRCL
 - **Movimento.** Testes conferem seed, seek determinístico, continuidade da câmera nas trocas de bloco e overlap de duas frases. Um trecho real carregado pelo LRCLIB foi renderizado pelo Studio em 671 quadros a 60 FPS. A gravação e o trace de projeção ficam em `artifacts/`.
 - **Custo gráfico.** Render fora da tela a 1920 × 1080 na Radeon RX 570, com o caminho transparente e blur de três amostras. Em 589 amostras válidas, a GPU teve mediana de 1,86 ms e p95 de 2,48 ms. A cena usou 11,25 MiB de máscaras. A sessão do Windows estava bloqueada, o que impediu validar a apresentação do novo fluxo sobre a área de trabalho. Os números são do render GPU.
 - **Testes.** Restore bloqueado, build Release e 31 testes aprovados, incluindo o replay do After Effects com evidência local. Letras, logs de reprodução, capturas e build executável ficam no computador.
-- **Limites atuais.** A sincronização é por linha. A cobertura depende do LRCLIB, a precisão depende do relógio do player e a primeira leitura pode levar alguns segundos. Outros players e o comportamento em jogos seguem pendentes de validação específica.
+- **Limites medidos na fase inicial.** Nessa fase, a sincronização era por linha. A cobertura depende do LRCLIB, a precisão depende do relógio do player e a primeira leitura pode levar alguns segundos. Outros players e o comportamento em jogos seguem pendentes de validação específica.
 
 ## Overlay anterior à integração
 

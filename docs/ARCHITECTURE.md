@@ -30,10 +30,10 @@ flowchart LR
 | --- | --- |
 | Lenoz Motion Engine | `src/Lenoz.Motion`, independente de Windows, relógio e GPU. Avalia curvas, caminhos, rig, wiggle e oscilação usando segundos absolutos. |
 | Camera Engine | O rig produz a matriz de mundo da câmera. `PerspectiveCamera` calcula a view inversa e a projeção. Dolly, rotação e FOV são canais independentes. |
-| Typography Engine | `GlyphMasks` forma uma linha com fonte do sistema e cache por texto, face e tracking. `ScenePlane` retém tamanho em mundo, cor e vínculo ao rig. |
-| Procedural Composer | `ProceduralSong` distribui frases em estações XYZ, com layouts determinados pela seed, ênfase em uma linha visual, curvas sobrepostas e uma câmera comum. `DemoSequence` continua disponível no Studio. |
+| Typography Engine | DirectWrite forma as palavras e expõe o mapa de clusters. Direct2D rasteriza contornos em atlas por palavra. D3D11 anima a posição dos clusters com instancing. O demo e o replay de referência usam máscaras de linha. |
+| Procedural Composer | ProceduralSong monta perfis de travessia lateral, mergulho e pivô em estações XYZ. Cada frase tem rig e enquadramento próprios. Cada palavra herda a pose global e tem entrada e acento no tempo do vocal. |
 | Audio Sync | `LivePlayback` seleciona a sessão GSMTC e converte posição, carimbo e velocidade em uma âncora monotônica. Para o Spotify desktop, NAudio lê o estado da sessão de áudio local se o player publicar `Playing` durante uma pausa. |
-| Lyrics Provider | `LrclibLyrics` tenta a gravação exata, consulta a busca e compara título, artista, duração e álbum. O parser LRC preserva offsets, múltiplas marcas e intervalos em branco. A busca e o cache ficam no worker. |
+| Lyrics Provider | Ler Enhanced LRC preserva tempos por palavra quando presentes. A rota por linha é padrão, com estimativa opcional. Arquivos locais por faixa têm prioridade sobre o LRCLIB. A consulta e o cache ficam no worker. |
 | Windows Overlay | Host preferencial. Swap chain de composição com alfa premultiplicado, visual DirectComposition em janela layered topmost, saída transparente e feather aplicado ao RGBA composto. Sombra por glifo em pixels de tela. |
 | AE Bridge | O leitor de referência reproduz apenas a cadeia de câmera da auditoria. O bridge geral continuará sendo um importador declarativo para canais, IDs, parents e eixos. O teste usa também matrizes e projeções medidas no AE. |
 | Studio | WinForms, relógio de preview, seek, taxa, reinício e métricas. A captura fora da janela e o benchmark instanciam o mesmo renderizador. |
@@ -50,7 +50,13 @@ flowchart LR
 
 O worker consulta a sessão do Windows a cada 250 ms e confirma a identidade da faixa em amostras consecutivas antes de consultar letras. Uma faixa nova invalida o quadro e cancela a consulta anterior. A posição é projetada pelo tempo monotônico local e um snapshot mais novo pode reposicionar a cena inclusive para trás. Quando uma sessão Spotify local previamente ativa fica inativa com GSMTC ainda em `Playing`, o relógio congela entre as duas amostras observadas. A retomada continua dessa âncora até chegar um carimbo novo. O fallback lê estado do stream WASAPI e dispensa amostragem de áudio. [Timeline GSMTC](https://learn.microsoft.com/en-us/uwp/api/windows.media.control.globalsystemmediatransportcontrolssessiontimelineproperties) · [Estado da sessão de áudio](https://learn.microsoft.com/en-us/windows/win32/api/audiosessiontypes/ne-audiosessiontypes-audiosessionstate).
 
-LRCLIB usa HTTPS identificado, com prazo limite, cancelamento e respeito a `Retry-After`. O cache de até 256 registros hashados grava em arquivo temporário e troca atomicamente. Acertos duram 30 dias, ausências confirmadas duram 20 minutos e erros transitórios permitem nova tentativa. O compositor prepara curvas no worker. O render usa blocos de quatro cues com vizinhos, reutiliza o dispositivo e retém apenas as máscaras do bloco atual. A animação para de apresentar quadros em regiões sem texto e durante pausa. [Documentação do LRCLIB](https://lrclib.net/docs.txt).
+LRCLIB usa HTTPS identificado, com prazo limite, cancelamento e respeito a `Retry-After`. O cache de até 256 registros hashados grava em arquivo temporário e troca atomicamente. Acertos duram 30 dias, ausências confirmadas duram 20 minutos e erros transitórios permitem nova tentativa. O compositor prepara curvas no worker. O render usa blocos de quatro cues com vizinhos e reutiliza o dispositivo. Prepara até uma textura nova do bloco seguinte por quadro e libera estilos fora do bloco ao avançar. A animação para de apresentar quadros em regiões sem texto e durante pausa. [Documentação do LRCLIB](https://lrclib.net/docs.txt).
+
+## Enquadramento e aparência
+
+O layout usa os avanços dos clusters e reserva a abertura máxima de tracking. O centro óptico e os limites vêm dos contornos projetados no viewport real. O enquadramento aplica escala e translação no espaço de projeção da frase, preservando Z, W e o rig de câmera. A escala nominal permanece fixa durante a leitura, com reavaliação de segurança a cada amostra. Ao redimensionar, o render recalcula margens e quebras de linha. Nas transições, a correção decai e devolve o movimento à trajetória original.
+
+A palavra ativa controla cor, tracking local, escala e halo. O shader combina duas escalas de brilho sobre uma máscara de glifos com alpha e mantém a sombra da sobreposição. A aparência resolve cores e fontes ao montar a faixa. A escolha de preset e o arquivo personalizado são preferências locais independentes. A seleção da aparência recompõe a faixa pelo cache e preserva a âncora da reprodução.
 
 ## Integrações planejadas
 

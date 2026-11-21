@@ -12,6 +12,7 @@ internal sealed class StudioForm : Form
     private static readonly double[] Speeds = [0.25, 0.5, 1, 1.5, 2];
 
     private readonly Sequence _sequence;
+    private readonly ProceduralSong? _song;
     private readonly StageSurface _surface = new() { Dock = DockStyle.Fill };
     private readonly TrackBar _seek = new()
     {
@@ -54,9 +55,10 @@ internal sealed class StudioForm : Form
     private double _cpuTotal;
     private double? _gpuMs;
 
-    public StudioForm(Sequence sequence, bool motionBlur)
+    public StudioForm(Sequence sequence, bool motionBlur, ProceduralSong? song = null)
     {
         _sequence = sequence;
+        _song = song;
         _clock = new PlaybackClock(sequence.Duration);
         _recordGpu = sample => _gpuMs = sample.Milliseconds;
 
@@ -238,6 +240,10 @@ internal sealed class StudioForm : Form
         StageRenderer renderer = _renderer!;
         renderer.Resize(_surface.Width, _surface.Height);
         double time = _clock.PositionAt(now);
+        if (_song?.SceneAt(time) is { } scene)
+        {
+            renderer.SetSequence(scene);
+        }
         if (_clock.IsPlaying && time >= _sequence.Duration)
         {
             _clock.Pause(now);

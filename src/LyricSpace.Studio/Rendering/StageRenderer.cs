@@ -13,7 +13,7 @@ using Vortice.Mathematics;
 
 namespace LyricSpace.Studio.Rendering;
 
-internal sealed class StageRenderer : IDisposable
+internal sealed partial class StageRenderer : IDisposable
 {
     internal const Format ColorFormat = Format.B8G8R8A8_UNorm;
     private const int ExposureSamples = 3;
@@ -26,10 +26,16 @@ internal sealed class StageRenderer : IDisposable
     private readonly IDXGIAdapter3? _memoryAdapter;
     private Sequence _sequence = null!;
     private readonly GlyphMasks _masks;
+    private readonly WordMasks _wordMasks;
+    private PhraseDrawing[] _phrases = [];
+    private Vector3[] _wordPositions = [];
+    private Matrix4x4[] _wordTransforms = [];
+    private bool _fitDirty;
     private OverlayLayout? _overlay;
     private bool _editingOverlay;
     private readonly GpuTimer _timer;
     private readonly ID3D11VertexShader _quadShader;
+    private readonly ID3D11VertexShader _wordShader;
     private readonly ID3D11VertexShader _screenShader;
     private readonly ID3D11PixelShader _opaqueShader;
     private readonly ID3D11PixelShader _blendShader;
@@ -37,6 +43,7 @@ internal sealed class StageRenderer : IDisposable
     private readonly ID3D11PixelShader _exposureShader;
     private readonly ID3D11PixelShader _overlayShader;
     private readonly ID3D11PixelShader _shadowShader;
+    private readonly ID3D11PixelShader _glowShader;
     private readonly ID3D11Buffer _constants;
     private readonly ID3D11SamplerState _sampler;
     private readonly ID3D11BlendState _blend;
@@ -111,6 +118,7 @@ internal sealed class StageRenderer : IDisposable
 
             _timer = Own(new GpuTimer(_device, _context));
             _masks = Own(new GlyphMasks(_device, _context));
+            _wordMasks = Own(new WordMasks(_device, _context));
             SetSequence(sequence);
             using var shaderStream = typeof(StageRenderer).Assembly.GetManifestResourceStream("LyricSpace.Studio.Rendering.Stage.hlsl")
                 ?? throw new InvalidOperationException("The stage shader resource is missing.");
@@ -118,6 +126,7 @@ internal sealed class StageRenderer : IDisposable
             string shader = reader.ReadToEnd();
 
             _quadShader = Own(_device.CreateVertexShader(Compile(shader, "QuadVS", "vs_5_0").Span));
+            _wordShader = Own(_device.CreateVertexShader(Compile(shader, "WordVS", "vs_5_0").Span));
             _screenShader = Own(_device.CreateVertexShader(Compile(shader, "ScreenVS", "vs_5_0").Span));
             _opaqueShader = Own(_device.CreatePixelShader(Compile(shader, "OpaquePS", "ps_5_0").Span));
             _blendShader = Own(_device.CreatePixelShader(Compile(shader, "BlendPS", "ps_5_0").Span));
@@ -125,6 +134,7 @@ internal sealed class StageRenderer : IDisposable
             _exposureShader = Own(_device.CreatePixelShader(Compile(shader, "ExposurePS", "ps_5_0").Span));
             _overlayShader = Own(_device.CreatePixelShader(Compile(shader, "OverlayPS", "ps_5_0").Span));
             _shadowShader = Own(_device.CreatePixelShader(Compile(shader, "ShadowPS", "ps_5_0").Span));
+            _glowShader = Own(_device.CreatePixelShader(Compile(shader, "GlowPS", "ps_5_0").Span));
             _constants = Own(_device.CreateConstantBuffer<DrawConstants>());
             _sampler = Own(_device.CreateSamplerState(new SamplerDescription(Filter.Anisotropic, TextureAddressMode.Clamp,
                 TextureAddressMode.Clamp, TextureAddressMode.Clamp, maxAnisotropy: 8)));
@@ -162,6 +172,7 @@ internal sealed class StageRenderer : IDisposable
         var styles = sequence.Planes.Where(plane => plane.Text.HasValue)
             .Select(plane => plane.Text!.Value).ToHashSet();
         _masks.Retain(styles);
+        _wordMasks.Retain(styles);
         _sequence = sequence;
         _world = new Matrix4x4[sequence.Rig.Count];
         _visible = new DrawItem[sequence.Planes.Length];
@@ -170,7 +181,8 @@ internal sealed class StageRenderer : IDisposable
         for (int index = 0; index < _planes.Length; index++)
         {
             ScenePlane plane = sequence.Planes[index];
-            GlyphMask? mask = plane.Text is { } text ? _masks.Get(text) : null;
+            WordMask? word = plane.Word is not null ? _wordMasks.Get(plane.Text!.Value) : null;
+            GlyphMask? mask = plane.Word is null && plane.Text is { } text ? _masks.Get(text) : null;
             Vector2 size = plane.Size;
             if (mask is { } glyph)
             {
@@ -179,15 +191,21 @@ internal sealed class StageRenderer : IDisposable
                 size.X = size.Y * glyph.Aspect;
             }
 
-            if (plane.Text.HasValue && mask is null)
+            if (plane.Text.HasValue && mask is null && word is null)
             {
                 plane = plane with { Opacity = _ => 0 };
             }
 
-            _planes[index] = new Drawable(plane, Matrix4x4.CreateScale(size.X, size.Y, 1), mask?.View);
+            _planes[index] = new Drawable(plane, Matrix4x4.CreateScale(size.X, size.Y, 1), word?.View ?? mask?.View, word);
         }
 
-        GlyphBytes = _masks.Bytes;
+        _wordPositions = new Vector3[_planes.Length];
+        _wordTransforms = new Matrix4x4[_planes.Length];
+        _phrases = Enumerable.Range(0, _planes.Length).Where(i => _planes[i].Word is not null)
+            .GroupBy(i => _planes[i].ScenePlane.Word!.Phrase)
+            .Select(group => BuildPhraseDrawing(group.Key, group.ToArray())).ToArray();
+        _fitDirty = true;
+        GlyphBytes = _masks.Bytes + _wordMasks.Bytes;
     }
 
     public void Resize(int width, int height)
@@ -218,6 +236,7 @@ internal sealed class StageRenderer : IDisposable
         _depth = _device.CreateDepthStencilView(texture);
         Width = width;
         Height = height;
+        _fitDirty = true;
 
         if (_overlay is { } layout)
         {
@@ -232,6 +251,7 @@ internal sealed class StageRenderer : IDisposable
 
     public void UpdateOverlayLayout(OverlayLayout layout, bool editing)
     {
+        _fitDirty |= _overlay?.Region.Size != layout.Region.Size || _overlay?.Feather != layout.Feather;
         _overlay = layout;
         _editingOverlay = editing;
         Rectangle region = layout.Region;
@@ -241,6 +261,7 @@ internal sealed class StageRenderer : IDisposable
     public void Draw(double seconds, bool motionBlur, long frame, Action<GpuSample>? measure = null)
     {
         ID3D11RenderTargetView target = _target ?? throw new InvalidOperationException("There is no render target.");
+        PrepareTypography();
         int samples = motionBlur ? ExposureSamples : 1;
         int targetCount = motionBlur || _overlay is not null ? samples : 0;
         if ((_exposureTargets?.Length ?? 0) != targetCount)
@@ -375,6 +396,7 @@ internal sealed class StageRenderer : IDisposable
         _sequence.Rig.Evaluate(seconds, _world);
         var camera = _world[_sequence.CameraNode];
         Matrix4x4 projection = ViewProjection(camera, seconds, _viewport.Width / _viewport.Height);
+        FramePhrases(seconds, projection);
         Vector3 viewAxis = new(camera.M31, camera.M32, camera.M33);
         int count = 0;
         for (int index = 0; index < _planes.Length; index++)
@@ -402,7 +424,7 @@ internal sealed class StageRenderer : IDisposable
             DrawItem item = _visible[index];
             if (item.Opacity >= 0.999f)
             {
-                DrawQuad(item, projection);
+                DrawQuad(item, projection, seconds);
             }
         }
 
@@ -416,7 +438,20 @@ internal sealed class StageRenderer : IDisposable
                 DrawItem item = _visible[index];
                 if (_planes[item.Index].Mask is not null)
                 {
-                    DrawQuad(item, projection);
+                    DrawQuad(item, projection, seconds);
+                }
+            }
+        }
+
+        if (_phrases.Length > 0)
+        {
+            _context.PSSetShader(_glowShader);
+            for (int index = 0; index < count; index++)
+            {
+                DrawItem item = _visible[index];
+                if (_planes[item.Index].ScenePlane.Word?.GlowAt(seconds) > 0.015f)
+                {
+                    DrawQuad(item, projection, seconds);
                 }
             }
         }
@@ -424,13 +459,13 @@ internal sealed class StageRenderer : IDisposable
         _context.PSSetShader(_blendShader);
         for (int index = 0; index < count; index++)
         {
-            DrawQuad(_visible[index], projection);
+            DrawQuad(_visible[index], projection, seconds);
         }
 
         _context.PSUnsetShaderResources(0, 1);
     }
 
-    private void DrawQuad(DrawItem item, Matrix4x4 projection)
+    private void DrawQuad(DrawItem item, Matrix4x4 projection, double seconds)
     {
         Drawable drawable = _planes[item.Index];
         if (drawable.Mask is { } mask)
@@ -438,6 +473,18 @@ internal sealed class StageRenderer : IDisposable
             _context.PSSetShaderResource(0, mask);
         }
 
+        if (drawable.Word is { } word)
+        {
+            var visual = drawable.ScenePlane.Word!;
+            SetConstants(new DrawConstants(_wordTransforms[item.Index], new Vector4(visual.ColorAt(seconds), item.Opacity),
+                new Vector4(visual.TrackingAt(seconds), (word.Clusters.Length + 1) * 0.5f, visual.GlowAt(seconds), visual.Phrase.GlowRadius)));
+            _context.VSSetShader(_wordShader);
+            _context.VSSetConstantBuffer(1, word.Instances);
+            _context.DrawInstanced(4, (uint)word.Clusters.Length, 0, 0);
+            return;
+        }
+
+        _context.VSSetShader(_quadShader);
         SetConstants(new DrawConstants(drawable.Size * _world[drawable.ScenePlane.Node] * projection,
             new Vector4(drawable.ScenePlane.Color, item.Opacity), new Vector4(0, drawable.Mask is null ? 0 : 1, 0, 0)));
         _context.Draw(4, 0);
@@ -548,7 +595,7 @@ internal sealed class StageRenderer : IDisposable
     [StructLayout(LayoutKind.Sequential)]
     private readonly record struct DrawConstants(Matrix4x4 Transform, Vector4 Tint, Vector4 Parameters);
 
-    private readonly record struct Drawable(ScenePlane ScenePlane, Matrix4x4 Size, ID3D11ShaderResourceView? Mask);
+    private readonly record struct Drawable(ScenePlane ScenePlane, Matrix4x4 Size, ID3D11ShaderResourceView? Mask, WordMask? Word);
     private readonly record struct DrawItem(int Index, float Opacity, float Depth) : IComparable<DrawItem>
     {
         public int CompareTo(DrawItem other)

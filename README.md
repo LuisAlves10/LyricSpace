@@ -18,13 +18,31 @@ O overlay começa menor no canto inferior direito. Segure **Ctrl + Shift + Alt**
 
 Para iniciar numa região explícita, passe `-- --region 40,560,720,405 --feather 54`. Os valores são X, Y, largura e altura em pixels a partir da origem do monitor primário. `--demo` exibe a cena autoral de 8,6 s. `--loop` repete a demo até encerrar o processo. `--no-blur` troca as três amostras temporais por uma.
 
-O LRCLIB recebe título, artista, álbum e duração para localizar a gravação. O cache fica em `%LOCALAPPDATA%\LyricSpace\lyrics-cache`. Cada faixa usa timestamps por linha. `--seed 12345` permite repetir a composição da faixa com os mesmos dados. A disponibilidade e o encaixe da letra dependem da gravação no LRCLIB.
+O LRCLIB recebe título, artista, álbum e duração para localizar a gravação. O cache fica em `%LOCALAPPDATA%\LyricSpace\lyrics-cache`. `--seed 12345` permite repetir a composição da faixa com os mesmos dados. A disponibilidade e o encaixe da letra dependem da gravação no LRCLIB.
+
+## Aparência e palavras
+
+Abra **Aparência** no menu do ícone do LyricSpace na bandeja. Escolha **Marfim e âmbar**, **Branco com glow** ou **Azul monocromático**. **Editar arquivo personalizado** cria o arquivo com os valores da aparência atual e abre o editor. Após salvar, escolha **Aplicar arquivo personalizado** no mesmo menu.
+
+O arquivo fica em **%LOCALAPPDATA%\LyricSpace\appearance.json**. As chaves Base, Secondary e Accent recebem cores em #RRGGBB. DisplayFont e BodyFont recebem nomes de fontes do Windows. Glow e AmbientGlow controlam o halo ativo e de fundo, e GlowRadius ajusta o raio em pixels. Tracking e ActiveTracking medem a expansão em em. Motion controla a intensidade do movimento. Reveal aceita none, some ou all para definir quais palavras aguardam o início do vocal.
+
+O destaque preciso usa os tempos internos de Enhanced LRC. Para aplicar uma letra local no overlay, salve o arquivo em **%LOCALAPPDATA%\LyricSpace\lyrics**, com nome no formato **Artista - Título.lrc**, seguindo os metadados da sessão do Windows. Caracteres inválidos de nome de arquivo viram sublinhado. A letra é lida na próxima carga da faixa.
+
+Exemplo curto de Enhanced LRC com três palavras e o fim da última:
+
+```lrc
+[00:02.000]<00:02.000>Eu <00:02.250>volto <00:02.770>devagar<00:03.950>
+```
+
+Quando a fonte fornece apenas tempos de linha, a frase continua sincronizada por linha. Para experimentar destaque estimado por palavra, defina **"EstimateWords": true** no arquivo personalizado. A bandeja identifica esse modo. O cálculo distribui o tempo da linha segundo o comprimento dos termos e a pontuação.
 
 ## Abrir o Studio
 
 ```powershell
 dotnet run --project src/LyricSpace.Studio -c Release --no-build -- --studio
 ```
+
+Para experimentar uma letra local no Studio, adicione --lrc caminho.lrc. Use --look ivory, --look white, --look ice ou --appearance caminho.json para selecionar a aparência. Esses parâmetros também acompanham --capture, --trace e --overlay-benchmark ao usar --lrc. A captura com uma região explícita gera PNGs com alpha. O trace com LRC mede o centro óptico, os limites e a folga de cada frase. As coordenadas da região no trace e na captura são relativas ao alvo de 1280 × 720.
 
 Use **Pausar / Reproduzir**, **Reiniciar**, a barra de tempo e o seletor de velocidade. O status mostra FPS de submissão e tempos de quadro, CPU e GPU. Com `--seed 12345`, a microvariação é reproduzível.
 

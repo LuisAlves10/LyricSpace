@@ -13,6 +13,7 @@ internal sealed class BenchmarkForm : Form
     private const double MeasurementSeconds = 20;
 
     private readonly Sequence _sequence;
+    private readonly ProceduralSong? _song;
     private readonly OverlayLayout? _overlay;
     private readonly bool _motionBlur;
     private readonly string _output;
@@ -34,9 +35,10 @@ internal sealed class BenchmarkForm : Form
     private long _frame;
     private uint? _firstPresentCount;
 
-    public BenchmarkForm(Sequence sequence, bool motionBlur, string output, OverlayLayout? overlay = null)
+    public BenchmarkForm(Sequence sequence, bool motionBlur, string output, OverlayLayout? overlay = null, ProceduralSong? song = null)
     {
         _sequence = sequence;
+        _song = song;
         _overlay = overlay;
         _motionBlur = motionBlur;
         _output = Path.GetFullPath(output);
@@ -136,7 +138,13 @@ internal sealed class BenchmarkForm : Form
             }
 
             long start = Stopwatch.GetTimestamp();
-            renderer.Draw(age % _sequence.Duration, _motionBlur, _frame++, _recordGpu);
+            double seconds = age % _sequence.Duration;
+            if (_song?.SceneAt(seconds) is { } scene)
+            {
+                renderer.SetSequence(scene);
+            }
+            renderer.Draw(seconds, _motionBlur, _frame++, _recordGpu);
+            renderer.WarmUpcoming(_song?.NextSceneAt(seconds));
             double cpuMs = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
             start = Stopwatch.GetTimestamp();
             if (!renderer.Present())

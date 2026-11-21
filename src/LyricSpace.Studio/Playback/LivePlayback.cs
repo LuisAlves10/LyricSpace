@@ -12,18 +12,24 @@ internal sealed class LivePlayback : IDisposable
     private readonly CancellationTokenSource _stop = new();
     private readonly Task _worker;
     private LiveFrame? _frame;
+    private SongLook _look;
     private string _status = "Aguardando música";
 
-    public LivePlayback(string cacheFolder, uint seed, string? logPath)
+    public LivePlayback(string cacheFolder, string localLyrics, uint seed, SongLook look, string? logPath)
     {
+        _look = look;
         StreamWriter? log = logPath is null ? null : new StreamWriter(logPath);
-        _worker = Task.Run(() => RunAsync(cacheFolder, seed, log, _stop.Token));
+        _worker = Task.Run(() => RunAsync(cacheFolder, localLyrics, seed, log, _stop.Token));
     }
 
     public LiveFrame? Frame => Volatile.Read(ref _frame);
     public string TrayStatus => Volatile.Read(ref _status);
 
-    private async Task RunAsync(string cacheFolder, uint seed, StreamWriter? log, CancellationToken stop)
+    public SongLook Appearance => Volatile.Read(ref _look);
+
+    public void SetAppearance(SongLook look) => Volatile.Write(ref _look, look);
+
+    private async Task RunAsync(string cacheFolder, string localLyrics, uint seed, StreamWriter? log, CancellationToken stop)
     {
         using var trace = log;
         using var http = LrclibLyrics.CreateHttp();
@@ -37,6 +43,7 @@ internal sealed class LivePlayback : IDisposable
         var spotifyClock = new LocalPauseClock();
         ProceduralSong? song = null;
         bool noLyrics = false;
+        SongLook currentLook = Appearance;
         try
         {
             while (!stop.IsCancellationRequested)
@@ -56,7 +63,9 @@ internal sealed class LivePlayback : IDisposable
                 }
 
                 var next = sample is { } media ? (media.Source, media.Track) : ((string, Track)?)null;
-                if (identity != next)
+                SongLook look = Appearance;
+                bool trackChanged = identity != next;
+                if (trackChanged || currentLook != look)
                 {
                     Volatile.Write(ref _frame, null);
                     CancelLookup();
@@ -64,7 +73,11 @@ internal sealed class LivePlayback : IDisposable
                     song = null;
                     noLyrics = false;
                     retryAt = FramePacer.Now + 0.45;
-                    spotifyClock = new LocalPauseClock();
+                    currentLook = look;
+                    if (trackChanged)
+                    {
+                        spotifyClock = new LocalPauseClock();
+                    }
                 }
 
                 double now = FramePacer.Now;
@@ -99,22 +112,24 @@ internal sealed class LivePlayback : IDisposable
                     if (lookup is null && song is null && now >= retryAt)
                     {
                         lookupCancellation = CancellationTokenSource.CreateLinkedTokenSource(stop);
-                        lookup = LoadSongAsync(lyrics, reading.Track, seed, lookupCancellation.Token);
+                        lookup = LoadSongAsync(lyrics, localLyrics, reading.Track, seed, look, lookupCancellation.Token);
                     }
 
+                    double time = clock.At(now);
+                    TimingKind? timing = song?.TimingAt(time);
                     Volatile.Write(ref _frame, new LiveFrame(clock, song));
                     Volatile.Write(ref _status, noLyrics ? "Sem letra sincronizada para esta faixa"
                         : song is null ? now + 1 < retryAt ? "Busca indisponível. Tentando novamente em instantes" : "Buscando letra"
-                        : clock.Rate > 0 ? "Letra sincronizada" : "Reprodução pausada");
+                        : clock.Rate <= 0 ? "Reprodução pausada"
+                        : timing == TimingKind.Estimated ? "Palavras com tempo estimado" : "Letra sincronizada");
 
                     if (trace is not null)
                     {
-                        double time = clock.At(now);
                         Trace(trace, new
                         {
                             Event = "playback", reading.Source, reading.Track, clock.Rate, Audio = audio.ToString(),
                             Position = time, Sample = reading.ReportedPosition, reading.SampleAge,
-                            Cue = song?.CueAt(time), Utc = DateTimeOffset.UtcNow
+                            Cue = song?.CueAt(time), Timing = timing?.ToString(), Utc = DateTimeOffset.UtcNow
                         });
                     }
                 }
@@ -181,13 +196,28 @@ internal sealed class LivePlayback : IDisposable
         return new Reading(session.SourceAppUserModelId, track, clock, position, age, timeline.LastUpdatedTime);
     }
 
-    private static async Task<ProceduralSong> LoadSongAsync(LrclibLyrics source, Track track, uint seed, CancellationToken stop)
+    private static async Task<ProceduralSong> LoadSongAsync(LrclibLyrics source, string localFolder, Track track,
+        uint seed, SongLook look, CancellationToken stop)
     {
-        var lyrics = await source.FindAsync(track, stop);
-        stop.ThrowIfCancellationRequested();
-        return new ProceduralSong(lyrics, track.Duration, seed);
-    }
+        string name = string.Concat($"{track.Artist} - {track.Title}".Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c));
+        string path = Path.Combine(localFolder, name + ".lrc");
+        LyricCue[]? local = null;
+        try
+        {
+            if (File.Exists(path) && new FileInfo(path).Length <= 4L * LrcParser.MaxCharacters)
+            {
+                local = LrcParser.Parse(await File.ReadAllTextAsync(path, stop));
+            }
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            // An unavailable local override can be recovered from LRCLIB.
+        }
 
+        LyricCue[] lyrics = local?.Any(cue => cue.Text.Length > 0) == true ? local : await source.FindAsync(track, stop);
+        stop.ThrowIfCancellationRequested();
+        return new ProceduralSong(lyrics, track.Duration, seed, look);
+    }
     private static void Trace<T>(StreamWriter? trace, T value)
     {
         if (trace is not null)

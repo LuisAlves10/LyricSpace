@@ -2,6 +2,7 @@ using System.Globalization;
 using LyricSpace.Studio.Composition;
 using LyricSpace.Studio.Diagnostics;
 using LyricSpace.Studio.Overlay;
+using LyricSpace.Studio.Lyrics;
 using LyricSpace.Studio.Playback;
 
 namespace LyricSpace.Studio;
@@ -19,6 +20,9 @@ internal static class Program
             bool studio = false;
             bool demo = false;
             string? mediaLog = null;
+            string? preset = null;
+            string? customAppearance = null;
+            string? localLrc = null;
             bool loop = false;
             string? capture = null;
             string? benchmark = null;
@@ -61,6 +65,15 @@ internal static class Program
                     case "--media-log":
                         mediaLog = Argument(args, ref index);
                         break;
+                    case "--look":
+                        preset = Argument(args, ref index);
+                        break;
+                    case "--appearance":
+                        customAppearance = Argument(args, ref index);
+                        break;
+                    case "--lrc":
+                        localLrc = Argument(args, ref index);
+                        break;
                     case "--studio":
                         studio = true;
                         break;
@@ -82,24 +95,47 @@ internal static class Program
 
             ApplicationConfiguration.Initialize();
             Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException);
-            Sequence sequence = evidence is null ? DemoSequence.Create(seed) : ReferenceSequence.Create(evidence);
+            string folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LyricSpace");
+            var preferences = new AppearancePreferences(folder);
+            bool offline = studio || capture is not null || trace is not null || benchmark is not null || overlayBenchmark is not null;
+            if (localLrc is not null && (!offline || demo || loop || evidence is not null))
+            {
+                throw new ArgumentException("Use --lrc com --studio, --capture, --trace ou um benchmark.");
+            }
+
+            SongLook look = SongLook.Default;
+            if (!offline || localLrc is not null)
+            {
+                look = preset is null && customAppearance is null ? preferences.ReadDefault() : preferences.Read(preset, customAppearance);
+            }
+            ProceduralSong? song = localLrc is null ? null : ReadSong(localLrc, seed, look);
+            Sequence sequence = song?.SceneAt(0) ?? (evidence is null ? DemoSequence.Create(seed) : ReferenceSequence.Create(evidence));
             if (trace is not null)
             {
-                MotionTrace.Write(sequence, trace);
+                if (song is null)
+                {
+                    MotionTrace.Write(sequence, trace);
+                }
+                else
+                {
+                    MotionTrace.WriteReading(song, trace, OverlayLayout.Fit(new Size(1280, 720), region, feather));
+                }
             }
             else if (capture is not null)
             {
-                FrameCapture.Run(sequence, motionBlur, capture);
+                OverlayLayout? captureLayout = region is not null || feather is not null
+                    ? OverlayLayout.Fit(new Size(1280, 720), region, feather) : null;
+                FrameCapture.Run(sequence, motionBlur, capture, song, captureLayout);
             }
             else if (benchmark is not null)
             {
-                using var form = new BenchmarkForm(sequence, motionBlur, benchmark);
+                using var form = new BenchmarkForm(sequence, motionBlur, benchmark, song: song);
                 Application.Run(form);
                 return form.Completed ? 0 : 1;
             }
             else if (studio)
             {
-                using var form = new StudioForm(sequence, motionBlur);
+                using var form = new StudioForm(sequence, motionBlur, song);
                 Application.Run(form);
             }
             else
@@ -108,15 +144,14 @@ internal static class Program
                 OverlayLayout layout = OverlayLayout.Fit(screen.Size, region, feather);
                 if (overlayBenchmark is not null)
                 {
-                    using var form = new BenchmarkForm(sequence, motionBlur, overlayBenchmark, layout);
+                    using var form = new BenchmarkForm(sequence, motionBlur, overlayBenchmark, layout, song);
                     Application.Run(form);
                     return form.Completed ? 0 : 1;
                 }
 
                 using var live = demo || loop || evidence is not null ? null : new LivePlayback(
-                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LyricSpace", "lyrics-cache"),
-                    seed, mediaLog);
-                using var overlay = new OverlayWindow(sequence, motionBlur, loop, screen, layout, live);
+                    Path.Combine(folder, "lyrics-cache"), Path.Combine(folder, "lyrics"), seed, look, mediaLog);
+                using var overlay = new OverlayWindow(sequence, motionBlur, loop, screen, layout, live, preferences);
                 Application.Run(overlay);
             }
 
@@ -138,6 +173,24 @@ internal static class Program
 
             return 1;
         }
+    }
+
+    private static ProceduralSong ReadSong(string path, uint seed, SongLook look)
+    {
+        if (new FileInfo(path).Length > 4L * LrcParser.MaxCharacters)
+        {
+            throw new ArgumentException("O arquivo de letras excede o tamanho suportado.");
+        }
+
+        var cues = LrcParser.Parse(File.ReadAllText(path));
+        if (!cues.Any(cue => cue.Text.Length > 0))
+        {
+            throw new ArgumentException("O arquivo precisa conter pelo menos uma linha LRC com timestamp.");
+        }
+
+        double tail = cues[^1].Text.Length == 0 ? 0.25 : 4;
+        double duration = Math.Max(cues[^1].Seconds + tail, cues[^1].Words?[^1].End ?? 0);
+        return new ProceduralSong(cues, duration, seed, look);
     }
 
     private static string Argument(string[] args, ref int index)

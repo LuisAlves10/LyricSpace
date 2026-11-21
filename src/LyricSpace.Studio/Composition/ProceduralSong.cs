@@ -8,14 +8,13 @@ namespace LyricSpace.Studio.Composition;
 internal sealed class ProceduralSong
 {
     private const int CuesPerScene = 4;
-    private static readonly Vector3[] Accents = [new(0.39f, 0.87f, 0.98f), new(1, 0.60f, 0.35f), new(0.73f, 0.70f, 1)];
-    private static readonly Vector3 Ivory = new(0.97f, 0.94f, 0.87f);
     private readonly double[] _starts;
     private readonly double[] _visibleUntil;
     private readonly Sequence[] _scenes;
 
-    public ProceduralSong(LyricCue[] lyrics, double duration, uint seed)
+    public ProceduralSong(LyricCue[] lyrics, double duration, uint seed, SongLook? look = null)
     {
+        look ??= SongLook.Default;
         var cues = lyrics.Where(cue => cue.Seconds < duration).ToArray();
         _starts = cues.Select(cue => cue.Seconds).ToArray();
         _visibleUntil = new double[cues.Length];
@@ -26,56 +25,54 @@ internal sealed class ProceduralSong
         }
 
         var rng = new LayoutRandom(seed);
+        var profiles = new GestureProfile[cues.Length];
         var centers = new Vector3[cues.Length];
-        var accents = new Vector3[cues.Length];
-        var directions = new float[cues.Length];
-        int palette = (int)(rng.Next() * Accents.Length);
+        double[] lengths = _starts.Select((start, i) => (i + 1 < cues.Length ? _starts[i + 1] : duration) - start).ToArray();
         for (int i = 0; i < cues.Length; i++)
         {
+            MotionFamily? previous = i > 0 ? profiles[i - 1].Family : null;
+            var profile = profiles[i] = GestureProfile.Choose(ref rng, previous, lengths[i]);
             double spacing = i == 0 ? 0 : _starts[i] - _starts[i - 1];
-            float scale = (float)Math.Clamp(spacing, 0.05, 1);
-            float direction = (i % 2 == 0 ? -1 : 1) * (palette == 1 ? -1 : 1);
-            float z = i == 0 ? 0 : centers[i - 1].Z - (float)Math.Min(spacing * 1.45, 3.0);
-            centers[i] = new Vector3(direction * (0.33f + rng.Next() * 0.43f) * scale, (rng.Next() - 0.5f) * 0.34f, z);
-            accents[i] = Accents[(palette + i / 4) % Accents.Length];
-            directions[i] = direction * (0.65f + rng.Next() * 0.35f);
+            float strength = look.Motion * (float)Math.Clamp(spacing, 0.07, 1);
+            float z = i == 0 ? 0 : centers[i - 1].Z - (float)Math.Min(spacing * 1.55, 3.3) * look.Motion;
+            centers[i] = new Vector3(profile.Direction * profile.Reach * 0.65f * strength,
+                (rng.Next() - 0.5f) * 0.7f * strength, z);
         }
 
         ScalarCurve x = Travel(centers.Select(c => c.X).ToArray(), false);
         ScalarCurve y = Travel(centers.Select(c => c.Y).ToArray(), false);
         ScalarCurve zTravel = Travel(centers.Select(c => c.Z).ToArray(), true);
-        double[] lengths = _starts.Select((start, i) => (i + 1 < cues.Length ? _starts[i + 1] : duration) - start).ToArray();
-        ScalarCurve depthAttack = Gesture(lengths, 0.06, 0.56, -0.62, 0.24, 0.82);
-        ScalarCurve depthRecovery = Gesture(lengths, 0.28, 0.83, 0.48, 0.70, 0.52);
-        ScalarCurve roll = Gesture(lengths, 0.16, 0.95, 3.5, 0.45, 0.82, directions);
-        var zoom = new ScalarCurve(PulseKeys(lengths, 0.28, 0.89, -74, 0.27, 0.76, null)
-            .Select(k => k with { Value = 1390 + k.Value }).ToArray());
-        var temperature = new ScalarCurve(new Key(0, palette));
+        var depthAttack = Pulse(lengths, profiles, p => (p.Depth * -0.46 * look.Motion, p.Attack * 0.46, 0.63, p.Out, p.In));
+        var depthRecovery = Pulse(lengths, profiles, p => (p.Depth * 0.33 * look.Motion, p.Counter, 0.91, p.In, p.Out));
+        var roll = Pulse(lengths, profiles, p => (p.Direction * p.Rotation * 3.6 * look.Motion, p.Attack, 0.94, p.Out, p.In));
+        var zoom = Pulse(lengths, profiles, p => (-56 * p.Depth * look.Motion, p.Counter, 0.93, p.Out, p.In), 1370);
+        var temperature = new ScalarCurve(new Key(0, 0));
         var camera = new RigNode[]
         {
-            new("camera.traverse", null, t => new Pose(new Vector3((float)x.At(t), (float)y.At(t), 9.3f + (float)zTravel.At(t)))),
+            new("camera.traverse", null, t => new Pose(new Vector3((float)x.At(t), (float)y.At(t), 9.5f + (float)zTravel.At(t)))),
             new("camera.depth-attack", 0, t => new Pose(new Vector3(0, 0, (float)depthAttack.At(t)))),
             new("camera.depth-recovery", 1, t => new Pose(new Vector3(0, 0, (float)depthRecovery.At(t)))),
             new("camera.roll", 2, t => new Pose(Vector3.Zero, new Vector3(0, 0, (float)roll.At(t))))
         };
 
         var groups = new Phrase?[cues.Length];
+        WordPalette palette = look.Palette;
         for (int i = 0; i < cues.Length; i++)
         {
-            if (cues[i].Text.Length > 0)
+            if (cues[i].Text.Length == 0)
             {
-                bool nextIsText = i + 1 < cues.Length && cues[i + 1].Text.Length > 0;
-                double nextLength = i + 1 < cues.Length ? lengths[i + 1] : 0;
-                var group = BuildGroup(i, cues[i], centers[i], directions[i], accents[i], lengths[i], nextLength, nextIsText, rng.Next());
-                groups[i] = group;
-                _visibleUntil[i] = group.End;
+                continue;
             }
+
+            double nextLength = i + 1 < cues.Length && cues[i + 1].Text.Length > 0 ? lengths[i + 1] : 0;
+            var group = BuildGroup(i, cues[i], centers[i], profiles[i], look, palette, lengths[i], nextLength, ref rng);
+            groups[i] = group;
+            _visibleUntil[i] = group.End;
         }
 
         for (int page = 0; page < _scenes.Length; page++)
         {
             int first = page * CuesPerScene;
-            // Neighboring cues retain their original absolute transforms during a scene swap.
             var nodes = new List<RigNode>(camera);
             var planes = new List<ScenePlane>();
             for (int i = Math.Max(0, first - 1); i < Math.Min(cues.Length, first + CuesPerScene + 1); i++)
@@ -100,6 +97,7 @@ internal sealed class ProceduralSong
     }
 
     public bool HasText => _scenes.Any(scene => scene.Planes.Length > 0);
+    public double Duration => _scenes.Length == 0 ? 0 : _scenes[0].Duration;
 
     public bool CanRender(double seconds)
     {
@@ -107,6 +105,13 @@ internal sealed class ProceduralSong
         int cue = CueAt(seconds + exposurePadding);
         return (cue >= 0 && _visibleUntil[cue] > seconds - exposurePadding)
             || (cue > 0 && _visibleUntil[cue - 1] > seconds - exposurePadding);
+    }
+
+    public TimingKind? TimingAt(double seconds)
+    {
+        int index = CueAt(seconds);
+        return index < 0 ? null : SceneAt(seconds)?.Planes.FirstOrDefault(
+            plane => plane.Word?.Phrase.Index == index).Word?.Vocal.Timing;
     }
 
     public int CueAt(double seconds)
@@ -117,6 +122,12 @@ internal sealed class ProceduralSong
 
     public Sequence? SceneAt(double seconds)
         => _scenes.Length == 0 ? null : _scenes[Math.Max(0, CueAt(seconds)) / CuesPerScene];
+
+    public Sequence? NextSceneAt(double seconds)
+    {
+        int next = Math.Max(0, CueAt(seconds)) / CuesPerScene + 1;
+        return next < _scenes.Length ? _scenes[next] : null;
+    }
 
     private ScalarCurve Travel(float[] values, bool carryVelocity)
     {
@@ -130,134 +141,199 @@ internal sealed class ProceduralSong
                 double outgoing = (values[i] - values[i + 1]) / (_starts[i + 1] - _starts[i]);
                 velocity = -0.58 * Math.Min(incoming, outgoing);
             }
-
             keys[i] = new Key(_starts[i], values[i], new Ease(0.73, velocity), new Ease(0.26, velocity));
         }
-
         return new ScalarCurve(keys);
     }
 
-    private ScalarCurve Gesture(double[] lengths, double peak, double finish, double amplitude,
-        double attack, double release, float[]? signs = null)
-        => new(PulseKeys(lengths, peak, finish, amplitude, attack, release, signs));
-
-    private Key[] PulseKeys(double[] lengths, double peak, double finish, double amplitude,
-        double attack, double release, float[]? signs)
+    private ScalarCurve Pulse(double[] lengths, GestureProfile[] profiles,
+        Func<GestureProfile, (double Amplitude, double Peak, double End, double Out, double In)> shape, double basis = 0)
     {
         var keys = new List<Key>(_starts.Length * 3);
         for (int i = 0; i < _starts.Length; i++)
         {
+            var gesture = shape(profiles[i]);
             double start = _starts[i];
             double span = Math.Min(lengths[i], 5);
-            double strength = Math.Clamp(span / 1.3, 0, 1) * (signs?[i] ?? 1);
-            keys.Add(new Key(start, 0, new Ease(0.78), new Ease(attack)));
-            keys.Add(new Key(start + span * peak, strength * amplitude, new Ease(0.58), new Ease(0.26)));
-            keys.Add(new Key(start + span * finish, 0, new Ease(release), new Ease(0.3)));
+            double amplitude = gesture.Amplitude * Math.Clamp(span / 1.3, 0, 1);
+            keys.Add(new Key(start, basis, new Ease(0.75), new Ease(gesture.Out)));
+            keys.Add(new Key(start + span * gesture.Peak, basis + amplitude, new Ease(0.58), new Ease(0.28)));
+            keys.Add(new Key(start + span * gesture.End, basis, new Ease(gesture.In), new Ease(0.32)));
         }
-
-        return keys.ToArray();
+        return new ScalarCurve(keys.ToArray());
     }
 
-    private static Phrase BuildGroup(int index, LyricCue cue,
-        Vector3 origin, float direction, Vector3 accent, double interval, double nextInterval, bool nextText, float layout)
+    private static Phrase BuildGroup(int index, LyricCue cue, Vector3 origin, GestureProfile g,
+        SongLook look, WordPalette palette, double interval, double nextInterval, ref LayoutRandom rng)
     {
         string id = $"cue.{index}";
         double start = cue.Seconds;
-        double life = Math.Min(interval, 8);
-        double attack = Math.Min(life * 0.32, 0.66);
+        bool hasAuthoredWords = cue.Words is { Length: > 0 };
+        double life = hasAuthoredWords ? Math.Min(interval, Math.Max(8, cue.Words![^1].End.GetValueOrDefault(cue.Words[^1].Start + 1) - start))
+            : Math.Min(interval, 8);
+        double attack = Math.Min(life * g.Attack, 0.83);
         double exit = start + life;
-        double tail = nextText && life == interval ? Math.Min(0.36, nextInterval * 0.32) : 0;
-        var entry = Progress(start, start + attack, 0.24, 0.87);
-        var departure = Progress(exit - Math.Min(life * 0.16, 0.38), exit + tail, 0.73, 0.36);
-        var settle = Progress(start + attack * 0.36, start + Math.Min(life * 0.79, 1.4), 0.54, 0.83);
-        float energy = (float)Math.Clamp(life / 1.25, 0.08, 1);
+        double tail = life == interval ? Math.Min(g.Tail, nextInterval * 0.38) : 0;
+        double release = Math.Min(life * g.Release, 0.52);
+        double departureAt = exit - release;
+        double readStart = start + Math.Min(attack * 0.62, 0.19);
+        double readEnd = departureAt + release * 0.20;
+        if (hasAuthoredWords && cue.Words![^1] is { } last)
+        {
+            readEnd = Math.Min(exit, Math.Max(readEnd, last.End ?? last.Start));
+            if (tail > 0)
+            {
+                departureAt = Math.Max(departureAt, readEnd - release * 0.3);
+            }
+        }
+        var frameIn = Progress(start, readStart, 0.23, 0.77);
+        var frameOut = Progress(readEnd, exit + tail, 0.65, 0.35);
+        var style = new PhraseStyle(index, g.Family, start, readStart, readEnd, exit + tail, frameIn, frameOut,
+            g.Direction * g.Stagger * look.Motion, g.Width, look.Tracking, look.GlowRadius);
+        var entry = Progress(start, start + attack, g.Out, g.In);
+        var departure = Progress(departureAt, exit + tail, g.In, g.Out);
+        var countermove = Progress(start + attack * g.Counter, start + Math.Min(life * 0.79, 1.55), 0.48, g.In);
+        var fadeIn = Progress(start, start + Math.Min(attack * 0.70, 0.20), 0.24, 0.73);
+        float energy = look.Motion * (float)Math.Clamp(life / 1.12, 0.08, 1);
+
+        Vector3 enter = g.Family switch
+        {
+            MotionFamily.Traverse => new(g.Direction * g.Reach * -1.7f, g.Lift * 0.30f, -g.Depth * 0.45f),
+            MotionFamily.Depth => new(g.Direction * g.Reach * 0.40f, -g.Lift * 0.30f, -g.Depth * 2.30f),
+            _ => new(g.Direction * g.Reach * 0.53f, g.Lift * 1.05f, g.Depth * 0.42f)
+        };
+        Vector3 exitMove = g.Family switch
+        {
+            MotionFamily.Traverse => new(g.Direction * g.Reach * 2.9f, g.Lift * -0.42f, g.Depth * 0.70f),
+            MotionFamily.Depth => new(g.Direction * g.Reach * 0.92f, g.Lift * 0.92f, g.Depth * 2.1f),
+            _ => new(g.Direction * g.Reach * 1.3f, g.Lift * -1.7f, -g.Depth * 1.04f)
+        };
+        Vector3 enterRotation = new(g.Lift * (g.Family == MotionFamily.Depth ? 15 : 7),
+            g.Direction * g.Rotation * (g.Family == MotionFamily.Traverse ? 20 : 11),
+            g.Direction * g.Rotation * (g.Family == MotionFamily.Pivot ? 21 : 5));
         var field = new RigNode(id, null, t =>
         {
-            float incoming = 1 - (float)entry.At(t);
-            float outgoing = (float)departure.At(t);
-            return new Pose(origin + new Vector3(direction * (0.65f * incoming + 1.3f * outgoing),
-                    0.18f * (incoming - outgoing), -0.6f * incoming + 1.45f * outgoing) * energy,
-                new Vector3(5 * incoming, direction * (16 * incoming - 22 * outgoing), direction * (6 * incoming + 8 * outgoing)) * energy);
+            float ins = 1 - (float)entry.At(t);
+            float outs = (float)departure.At(t);
+            return new Pose(origin + (enter * ins + exitMove * outs) * energy,
+                (enterRotation * ins + new Vector3(9 * g.Lift, -24 * g.Direction, 13 * g.Direction) * outs * g.Rotation) * energy);
         });
         var counter = new RigNode(id + ".counter", null, t =>
         {
-            float p = (1 - (float)settle.At(t)) * energy;
-            return new Pose(new Vector3(-0.22f * direction, -0.16f, 0.4f) * p, new Vector3(-7, -12 * direction, -5 * direction) * p);
+            float p = (1 - (float)countermove.At(t)) * energy;
+            Vector3 shift = new(-enter.X * 0.28f, -enter.Y * 0.36f, -enter.Z * 0.48f);
+            return new Pose(shift * p, -enterRotation * (0.48f * p));
         });
 
-        string[] rows = Rows(cue.Text);
-        int hero = Array.IndexOf(rows, rows.MaxBy(row => row.Split(' ').Max(word => word.Length))!);
-        var words = new WordPlane[rows.Length];
-        float lineSpacing = Math.Min(0.99f + 0.22f * layout, 3.50f / rows.Length);
-        float stagger = layout < 0.33f ? 0.15f : layout < 0.66f ? 0.65f : -0.52f;
-        for (int row = 0; row < rows.Length; row++)
+        var lyrics = WordTiming.Resolve(cue, exit, look.EstimateWords);
+        int hero = Array.IndexOf(lyrics, lyrics.MaxBy(w => new StringInfo(w.Text).LengthInTextElements));
+        var words = new WordPlane[lyrics.Length];
+        for (int i = 0; i < words.Length; i++)
         {
-            bool lead = hero == row;
-            float height = lineSpacing * (lead ? 0.94f : 0.59f);
-            double delay = attack * 0.24 * row / rows.Length;
-            var fadeIn = Progress(start + delay, start + delay + attack * 0.47, 0.24, 0.72);
-            var landing = ScalarCurve.Between(start + delay, start + delay + attack, 1 - 0.21 * energy, 1,
-                new Ease(0.22), new Ease(0.70, 0.20 * energy / attack));
-            var overshoot = new ArrivalOscillation(landing, 0.085 * energy, 2.1, 5.0, Sequence.ReferenceFps);
-            Vector3 position = new((row - (rows.Length - 1) * 0.5f) * direction * stagger,
-                ((rows.Length - 1) * 0.5f - row) * lineSpacing, lead ? 0.22f : -0.18f);
-            var node = new RigNode($"{id}.row.{row}", null, t => new Pose(position,
-                new Vector3((lead ? -3 : 4) * direction, (lead ? 5 : -6) * direction, 0),
-                new Vector3((float)overshoot.At(t)), Vector3.Zero, Vector3.Zero));
-            var plane = new ScenePlane(0, new TextStyle(rows[row], lead ? Typeface.Display : Typeface.Condensed, lead ? 0 : 0.035f),
-                new Vector2(6.35f, height), lead ? accent : Ivory, t => (float)(fadeIn.At(t) * (1 - departure.At(t))));
-            words[row] = new WordPlane(node, plane);
-        }
+            var word = lyrics[i];
+            bool lead = i == hero;
+            float n = rng.Next();
+            bool pop = word.Timing != TimingKind.Line && (look.Reveal == "all"
+                || (look.Reveal == "some" && n < 0.30f && (i != 0 || lyrics.Length == 1)));
+            double span = word.End - word.Start;
+            double localAttack = Math.Min(0.15, span * 0.48);
+            var vocalIn = Progress(word.Start, word.Start + Math.Min(0.060, span * 0.30), 0.22, 0.78);
+            var vocalOut = Progress(word.End, word.End + Math.Min(0.115, span * 0.55), 0.32, 0.79);
+            var birth = Progress(word.Start, word.Start + localAttack, 0.24, 0.84);
+            var landing = ScalarCurve.Between(word.Start, word.Start + localAttack, 0, 1,
+                new Ease(0.25), new Ease(0.72, 0.21 / localAttack));
+            var punch = new ArrivalOscillation(landing, 0.012, 3.2, 9.2, Sequence.ReferenceFps);
+            var visual = new WordStyle(style, word, lead, pop, palette, vocalIn, vocalOut, look.ActiveTracking, look.Glow, look.AmbientGlow);
+            Vector3 pose = new(0, (rng.Next() - 0.5f) * 0.08f * energy,
+                (lead ? 0.21f : (rng.Next() - 0.5f) * 0.34f) * energy);
+            Vector3 tilt = new((rng.Next() - 0.5f) * 7, (rng.Next() - 0.5f) * (lead ? 18 : 11),
+                (lead ? g.Direction * 3.5f : (rng.Next() - 0.5f) * 4.8f));
+            var node = new RigNode($"{id}.word.{i}", null, t =>
+            {
+                float active = visual.AccentAt(t);
+                float local = pop ? 1 - (float)birth.At(t) : 0;
+                float bounce = word.Timing == TimingKind.Line ? 0 : (float)(punch.At(t) - landing.At(t));
+                float scale = 1 + energy * (active * 0.053f + Math.Clamp(bounce, -0.10f, 0.12f) - local * 0.16f);
+                return new Pose(pose + new Vector3(0.13f * g.Direction, -0.22f, -0.42f) * (local * energy),
+                    (tilt + new Vector3(8, g.Direction * 16, -11) * local) * energy,
+                    new Vector3(scale), Vector3.Zero, Vector3.Zero);
+            });
 
+            string text = word.Text;
+            float fontSize = lead ? 0.91f : 0.67f + rng.Next() * 0.11f;
+            var plane = new ScenePlane(0, new TextStyle(text, lead ? Typeface.Display : Typeface.Condensed, Family: lead ? look.DisplayFont : look.BodyFont),
+                new Vector2(0, fontSize), palette.Base, t =>
+                {
+                    float show = pop ? (t < word.Start ? 0 : 0.30f + 0.70f * (float)birth.At(t)) : 1;
+                    return show * (float)(fadeIn.At(t) * (1 - departure.At(t)));
+                }, visual);
+            words[i] = new WordPlane(node, plane);
+        }
         return new Phrase(field, counter, words, exit + tail);
     }
 
-    private static string[] Rows(string text)
+    private static VocalWord[] LimitFrameText(VocalWord[] words)
     {
-        const int target = 24;
-        // Keep unusual single-line transcriptions within a readable GPU text budget.
-        var elements = new StringInfo(text);
-        if (elements.LengthInTextElements > 216)
+        var result = new List<VocalWord>();
+        int remaining = 216;
+        foreach (VocalWord word in words)
         {
-            text = elements.SubstringByTextElements(0, 215) + "…";
-        }
-
-        var rows = new List<string>();
-        string line = "";
-        foreach (string word in text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
-        {
-            int[] boundaries = StringInfo.ParseCombiningCharacters(word);
-            for (int first = 0; first < boundaries.Length; first += target)
+            var text = new StringInfo(word.Text);
+            int limit = Math.Min(56, remaining);
+            if (limit < 2)
             {
-                int end = first + target < boundaries.Length ? boundaries[first + target] : word.Length;
-                string part = word[boundaries[first]..end];
-                if (line.Length > 0 && new StringInfo(line + " " + part).LengthInTextElements > target)
-                {
-                    rows.Add(line);
-                    line = "";
-                }
+                result[^1] = result[^1] with { Text = result[^1].Text.TrimEnd('…') + "…" };
+                break;
+            }
 
-                line = line.Length == 0 ? part : line + " " + part;
+            if (text.LengthInTextElements > limit)
+            {
+                result.Add(word with { Text = text.SubstringByTextElements(0, limit - 1) + "…" });
+                remaining -= limit + 1;
+            }
+            else
+            {
+                result.Add(word);
+                remaining -= text.LengthInTextElements + 1;
             }
         }
-
-        rows.Add(line);
-        if (rows.Count == 1 && line.Contains(' '))
-        {
-            // A short cue still gets a lead and a response on separate depth planes.
-            int midpoint = line.Length / 2;
-            int split = Enumerable.Range(0, line.Length).Where(i => line[i] == ' ').MinBy(i => Math.Abs(i - midpoint));
-            return [line[..split], line[(split + 1)..]];
-        }
-
-        return rows.ToArray();
+        return result.ToArray();
     }
-
     private static ScalarCurve Progress(double start, double end, double outgoing, double incoming)
         => ScalarCurve.Between(start, end, 0, 1, new Ease(outgoing), new Ease(incoming));
 
     private readonly record struct Phrase(RigNode Field, RigNode Counter, WordPlane[] Words, double End);
     private readonly record struct WordPlane(RigNode Node, ScenePlane Plane);
+
+    private readonly record struct GestureProfile(MotionFamily Family, float Direction, float Lift, float Reach,
+        float Depth, float Rotation, double Attack, double Release, double Counter, double Tail, double Out, double In,
+        float Width, float Stagger)
+    {
+        public static GestureProfile Choose(ref LayoutRandom rng, MotionFamily? previous, double duration)
+        {
+            MotionFamily family = rng.Next() switch
+            {
+                < 0.35f => MotionFamily.Traverse,
+                < 0.68f => MotionFamily.Depth,
+                _ => MotionFamily.Pivot
+            };
+            if (family == previous || (duration < 0.7 && family == MotionFamily.Pivot))
+            {
+                family = family == MotionFamily.Traverse || previous == MotionFamily.Traverse
+                    ? MotionFamily.Depth : MotionFamily.Traverse;
+                if (family == previous)
+                {
+                    family = MotionFamily.Traverse;
+                }
+            }
+
+            return new GestureProfile(family, rng.Next() < 0.5 ? -1 : 1, rng.Between(-1, 1), rng.Between(0.67f, 1.34f),
+                rng.Between(0.56f, 1.46f), rng.Between(0.58f, 1.38f), rng.Between(0.16f, 0.39f), rng.Between(0.12f, 0.28f),
+                rng.Between(0.24f, 0.52f), rng.Between(0.22f, 0.42f), rng.Between(0.16f, 0.43f), rng.Between(0.63f, 0.88f),
+                family == MotionFamily.Traverse ? rng.Between(5.6f, 7.0f) : rng.Between(3.6f, 5.5f),
+                rng.Between(0.08f, 0.65f));
+        }
+    }
 
     private struct LayoutRandom(uint seed)
     {
@@ -270,5 +346,7 @@ internal sealed class ProceduralSong
             _state ^= _state << 5;
             return (_state >> 8) / 16777216f;
         }
+
+        public float Between(float from, float to) => from + (to - from) * Next();
     }
 }

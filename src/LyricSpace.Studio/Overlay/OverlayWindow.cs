@@ -32,7 +32,7 @@ internal sealed class OverlayWindow : Form
     private double _start;
     private long _frame;
 
-    public OverlayWindow(Sequence sequence, bool motionBlur, bool loop, Rectangle display, OverlayLayout layout, LivePlayback? live)
+    public OverlayWindow(Sequence sequence, bool motionBlur, bool loop, Rectangle display, OverlayLayout layout, LivePlayback? live, AppearancePreferences preferences)
     {
         _sequence = live is null ? sequence : EmptyScene;
         _live = live;
@@ -41,6 +41,14 @@ internal sealed class OverlayWindow : Form
             _wake = new System.Windows.Forms.Timer { Interval = 40 };
             _wake.Tick += Render;
             _trayMenu = new ContextMenuStrip();
+            var appearance = new ToolStripMenuItem("Aparência");
+            appearance.DropDownItems.Add("Marfim e âmbar", null, (_, _) => Change(() => live.SetAppearance(preferences.Select("ivory"))));
+            appearance.DropDownItems.Add("Branco com glow", null, (_, _) => Change(() => live.SetAppearance(preferences.Select("white"))));
+            appearance.DropDownItems.Add("Azul monocromático", null, (_, _) => Change(() => live.SetAppearance(preferences.Select("ice"))));
+            appearance.DropDownItems.Add(new ToolStripSeparator());
+            appearance.DropDownItems.Add("Editar arquivo personalizado…", null, (_, _) => Change(() => preferences.Edit(live.Appearance)));
+            appearance.DropDownItems.Add("Aplicar arquivo personalizado", null, (_, _) => Change(() => live.SetAppearance(preferences.Select("custom"))));
+            _trayMenu.Items.Add(appearance);
             _trayMenu.Items.Add("Sair do LyricSpace", null, (_, _) => Close());
             _tray = new NotifyIcon { Icon = SystemIcons.Application, Text = "LyricSpace", ContextMenuStrip = _trayMenu };
         }
@@ -55,6 +63,19 @@ internal sealed class OverlayWindow : Form
         TopMost = true;
         ShowInTaskbar = false;
         AutoScaleMode = AutoScaleMode.None;
+    }
+
+    private void Change(Action action)
+    {
+        try
+        {
+            action();
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException
+            or System.Text.Json.JsonException or Win32Exception)
+        {
+            MessageBox.Show(error.Message, "Aparência do LyricSpace", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
     }
 
     protected override bool ShowWithoutActivation => true;
@@ -140,6 +161,11 @@ internal sealed class OverlayWindow : Form
             _renderer!.SetSequence(scene);
             _renderer.Draw(time, _motionBlur, _frame++);
             _renderer.Present();
+            if (playback?.Clock.Rate > 0)
+            {
+                _renderer.WarmUpcoming(scene != EmptyScene ? song?.NextSceneAt(time) : null);
+            }
+
             _renderedScene = scene;
             _lastTime = time;
             _dirty = false;

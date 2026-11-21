@@ -1,5 +1,6 @@
 using System.Drawing.Imaging;
 using LyricSpace.Studio.Composition;
+using LyricSpace.Studio.Overlay;
 using LyricSpace.Studio.Rendering;
 using Vortice.Direct3D11;
 
@@ -7,7 +8,7 @@ namespace LyricSpace.Studio.Diagnostics;
 
 internal static class FrameCapture
 {
-    public static void Run(Sequence sequence, bool motionBlur, string directory)
+    public static void Run(Sequence sequence, bool motionBlur, string directory, ProceduralSong? song = null, OverlayLayout? layout = null)
     {
         const int width = 1280;
         const int height = 720;
@@ -18,15 +19,19 @@ internal static class FrameCapture
             throw new IOException("A pasta de captura já contém frames. Escolha uma pasta vazia.");
         }
 
-        using var renderer = new StageRenderer(sequence, 0, width, height);
+        using var renderer = new StageRenderer(sequence, 0, width, height, layout);
         using var staging = renderer.Device.CreateTexture2D(StageRenderer.ColorFormat, width, height, bindFlags: BindFlags.None,
             usage: ResourceUsage.Staging, cpuAccessFlags: CpuAccessFlags.Read);
-        using var bitmap = new Bitmap(width, height, PixelFormat.Format32bppRgb);
+        using var bitmap = new Bitmap(width, height, layout is null ? PixelFormat.Format32bppRgb : PixelFormat.Format32bppPArgb);
 
         int lastFrame = (int)Math.Ceiling(sequence.Duration * fps);
         for (int frame = 0; frame <= lastFrame; frame++)
         {
             double time = Math.Min(sequence.Duration, frame / (double)fps);
+            if (song?.SceneAt(time) is { } scene)
+            {
+                renderer.SetSequence(scene);
+            }
             renderer.Draw(time, motionBlur, frame);
             renderer.Context.CopyResource(staging, renderer.Output);
             SaveMappedFrame(renderer.Context, staging, bitmap, Path.Combine(directory, $"frame_{frame:D4}.png"));
@@ -39,7 +44,7 @@ internal static class FrameCapture
         try
         {
             var bounds = new Rectangle(0, 0, bitmap.Width, bitmap.Height);
-            BitmapData pixels = bitmap.LockBits(bounds, ImageLockMode.WriteOnly, PixelFormat.Format32bppRgb);
+            BitmapData pixels = bitmap.LockBits(bounds, ImageLockMode.WriteOnly, bitmap.PixelFormat);
             try
             {
                 int rowBytes = bitmap.Width * 4;
