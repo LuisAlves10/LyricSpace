@@ -1,0 +1,15 @@
+{
+  "Base": "#FFFFFF",
+  "Secondary": "#D8D8D8",
+  "Accent": "#FFFFFF",
+  "DisplayFont": "Arial",
+  "BodyFont": "Bahnschrift",
+  "Glow": 1.12,
+  "AmbientGlow": 0.16,
+  "GlowRadius": 13,
+  "Tracking": 0.034,
+  "ActiveTracking": 0.017,
+  "Motion": 1.08,
+  "EstimateWords": true,
+  "Reveal": "some"
+}

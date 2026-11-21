@@ -5,6 +5,7 @@ namespace LyricSpace.Studio.Overlay;
 
 internal sealed class AppearancePreferences(string directory)
 {
+    private const string BaselinePreset = "visual-baseline-v1";
     private string CustomPath => Path.Combine(directory, "appearance.json");
     private string SelectionPath => Path.Combine(directory, "appearance-preset.txt");
 
@@ -15,8 +16,13 @@ internal sealed class AppearancePreferences(string directory)
             return SongLook.Read(custom);
         }
 
-        string selection = preset ?? (File.Exists(SelectionPath) ? File.ReadAllText(SelectionPath).Trim() : "ivory");
-        return selection == "custom" ? SongLook.Read(CustomPath) : SongLook.Preset(selection);
+        string selection = preset ?? (File.Exists(SelectionPath) ? File.ReadAllText(SelectionPath).Trim() : BaselinePreset);
+        return selection switch
+        {
+            BaselinePreset => SongLook.Read(Path.Combine(AppContext.BaseDirectory, "white-estimated.json")),
+            "custom" => SongLook.Read(CustomPath),
+            _ => SongLook.Preset(selection)
+        };
     }
 
     public SongLook ReadDefault()
@@ -28,7 +34,7 @@ internal sealed class AppearancePreferences(string directory)
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException
             or System.Text.Json.JsonException)
         {
-            return SongLook.Default;
+            return Read(BaselinePreset);
         }
     }
 

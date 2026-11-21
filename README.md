@@ -22,6 +22,8 @@ O LRCLIB recebe título, artista, álbum e duração para localizar a gravação
 
 ## Aparência e palavras
 
+O baseline visual oficial é `visual-baseline-v1`, sobre o código restaurado de `027e92c`. O overlay usa por padrão o [perfil branco do teste aprovado](src/LyricSpace.Studio/white-estimated.json), com estimativa por palavra para letras que trazem tempos de linha. Para escolher o mesmo perfil explicitamente, use `--look visual-baseline-v1`.
+
 Abra **Aparência** no menu do ícone do LyricSpace na bandeja. Escolha **Marfim e âmbar**, **Branco com glow** ou **Azul monocromático**. **Editar arquivo personalizado** cria o arquivo com os valores da aparência atual e abre o editor. Após salvar, escolha **Aplicar arquivo personalizado** no mesmo menu.
 
 O arquivo fica em **%LOCALAPPDATA%\LyricSpace\appearance.json**. As chaves Base, Secondary e Accent recebem cores em #RRGGBB. DisplayFont e BodyFont recebem nomes de fontes do Windows. Glow e AmbientGlow controlam o halo ativo e de fundo, e GlowRadius ajusta o raio em pixels. Tracking e ActiveTracking medem a expansão em em. Motion controla a intensidade do movimento. Reveal aceita none, some ou all para definir quais palavras aguardam o início do vocal.
