@@ -477,7 +477,7 @@ internal sealed partial class StageRenderer : IDisposable
         {
             var visual = drawable.ScenePlane.Word!;
             SetConstants(new DrawConstants(_wordTransforms[item.Index], new Vector4(visual.ColorAt(seconds), item.Opacity),
-                new Vector4(visual.TrackingAt(seconds), (word.Clusters.Length + 1) * 0.5f, visual.GlowAt(seconds), visual.Phrase.GlowRadius)));
+                new Vector4(visual.TrackingAt(seconds), (word.Clusters.Length + 1) * 0.5f, visual.GlowAt(seconds), visual.GlowRadius)));
             _context.VSSetShader(_wordShader);
             _context.VSSetConstantBuffer(1, word.Instances);
             _context.DrawInstanced(4, (uint)word.Clusters.Length, 0, 0);

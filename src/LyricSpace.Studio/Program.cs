@@ -108,7 +108,9 @@ internal static class Program
             {
                 look = preset is null && customAppearance is null ? preferences.ReadDefault() : preferences.Read(preset, customAppearance);
             }
-            ProceduralSong? song = localLrc is null ? null : ReadSong(localLrc, seed, look);
+            AnimationSettings animation = !offline || localLrc is not null
+                ? AnimationSettings.Read(Path.Combine(folder, "animation.json")) : AnimationSettings.Default;
+            ProceduralSong? song = localLrc is null ? null : ReadSong(localLrc, seed, look, animation);
             Sequence sequence = song?.SceneAt(0) ?? (evidence is null ? DemoSequence.Create(seed) : ReferenceSequence.Create(evidence));
             if (trace is not null)
             {
@@ -150,7 +152,7 @@ internal static class Program
                 }
 
                 using var live = demo || loop || evidence is not null ? null : new LivePlayback(
-                    Path.Combine(folder, "lyrics-cache"), Path.Combine(folder, "lyrics"), seed, look, mediaLog);
+                    Path.Combine(folder, "lyrics-cache"), Path.Combine(folder, "lyrics"), seed, look, animation, mediaLog);
                 using var overlay = new OverlayWindow(sequence, motionBlur, loop, screen, layout, live, preferences);
                 Application.Run(overlay);
             }
@@ -175,7 +177,7 @@ internal static class Program
         }
     }
 
-    private static ProceduralSong ReadSong(string path, uint seed, SongLook look)
+    private static ProceduralSong ReadSong(string path, uint seed, SongLook look, AnimationSettings animation)
     {
         if (new FileInfo(path).Length > 4L * LrcParser.MaxCharacters)
         {
@@ -190,7 +192,7 @@ internal static class Program
 
         double tail = cues[^1].Text.Length == 0 ? 0.25 : 4;
         double duration = Math.Max(cues[^1].Seconds + tail, cues[^1].Words?[^1].End ?? 0);
-        return new ProceduralSong(cues, duration, seed, look);
+        return new ProceduralSong(cues, duration, seed, look, animation);
     }
 
     private static string Argument(string[] args, ref int index)

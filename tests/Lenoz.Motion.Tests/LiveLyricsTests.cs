@@ -57,9 +57,10 @@ public sealed class LiveLyricsTests
     public void SceneChangePreservesCameraAndBothGroupsOverlap()
     {
         var lyrics = Enumerable.Range(0, 9).Select(i => new LyricCue(i * 2, $"Ponte em movimento {i}")).ToArray();
-        var song = new ProceduralSong(lyrics, 20, 12345);
-        var reproduction = new ProceduralSong(lyrics, 20, 12345);
-        var variant = new ProceduralSong(lyrics, 20, 48);
+        var byLine = AnimationSettings.Default with { EstimateWords = false };
+        var song = new ProceduralSong(lyrics, 20, 12345, animation: byLine);
+        var reproduction = new ProceduralSong(lyrics, 20, 12345, animation: byLine);
+        var variant = new ProceduralSong(lyrics, 20, 48, animation: byLine);
         var outgoing = song.SceneAt(7.99)!;
         var incoming = song.SceneAt(8)!;
         Assert.AreNotSame(outgoing, incoming);

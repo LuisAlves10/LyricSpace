@@ -7,6 +7,7 @@
     <ProjectReference Include="../../src/Lenoz.Motion/Lenoz.Motion.csproj" />
     <Compile Include="../../src/LyricSpace.Studio/Overlay/OverlayPlacement.cs" Link="OverlayPlacement.cs" />
     <Compile Include="../../src/LyricSpace.Studio/Composition/SongLook.cs" />
+    <Compile Include="../../src/LyricSpace.Studio/Composition/AnimationSettings.cs" />
     <Compile Include="../../src/LyricSpace.Studio/Composition/WordStyle.cs" />
     <Compile Include="../../src/LyricSpace.Studio/Rendering/OpticalFraming.cs" />
     <Compile Include="../../src/LyricSpace.Studio/Composition/Sequence.cs" />

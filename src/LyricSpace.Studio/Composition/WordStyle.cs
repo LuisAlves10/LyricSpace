@@ -8,14 +8,15 @@ internal enum MotionFamily { Traverse, Depth, Pivot }
 internal enum WordState { Line, Future, Active, Past }
 
 internal sealed record PhraseStyle(int Index, MotionFamily Family, double Start, double ReadStart, double ReadEnd, double End,
-    ScalarCurve FrameIn, ScalarCurve FrameOut, float Stagger, float Width, float Tracking, float GlowRadius)
+    ScalarCurve FrameIn, ScalarCurve FrameOut, float Stagger, float Width, float Tracking)
 {
+    public const float GlowReserve = 13;
     public float FramingAt(double seconds) => (float)(FrameIn.At(seconds) * (1 - FrameOut.At(seconds)));
     public float TrackingAt(double seconds) => Tracking * (float)Math.Clamp((seconds - Start) / (ReadEnd - Start), 0, 1);
 }
 
 internal sealed record WordStyle(PhraseStyle Phrase, VocalWord Vocal, bool Lead, bool RevealOnVocal, WordPalette Palette,
-    ScalarCurve AccentIn, ScalarCurve AccentOut, float AccentTracking, float Glow, float AmbientGlow)
+    ScalarCurve AccentIn, ScalarCurve AccentOut, float AccentTracking, float Glow, float AmbientGlow, float GlowRadius)
 {
     public WordState StateAt(double t) => Vocal.Timing == TimingKind.Line ? WordState.Line
         : t < Vocal.Start ? WordState.Future : t < Vocal.End ? WordState.Active : WordState.Past;

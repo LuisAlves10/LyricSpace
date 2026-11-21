@@ -15,11 +15,11 @@ internal sealed class LivePlayback : IDisposable
     private SongLook _look;
     private string _status = "Aguardando música";
 
-    public LivePlayback(string cacheFolder, string localLyrics, uint seed, SongLook look, string? logPath)
+    public LivePlayback(string cacheFolder, string localLyrics, uint seed, SongLook look, AnimationSettings animation, string? logPath)
     {
         _look = look;
         StreamWriter? log = logPath is null ? null : new StreamWriter(logPath);
-        _worker = Task.Run(() => RunAsync(cacheFolder, localLyrics, seed, log, _stop.Token));
+        _worker = Task.Run(() => RunAsync(cacheFolder, localLyrics, seed, animation, log, _stop.Token));
     }
 
     public LiveFrame? Frame => Volatile.Read(ref _frame);
@@ -29,7 +29,7 @@ internal sealed class LivePlayback : IDisposable
 
     public void SetAppearance(SongLook look) => Volatile.Write(ref _look, look);
 
-    private async Task RunAsync(string cacheFolder, string localLyrics, uint seed, StreamWriter? log, CancellationToken stop)
+    private async Task RunAsync(string cacheFolder, string localLyrics, uint seed, AnimationSettings animation, StreamWriter? log, CancellationToken stop)
     {
         using var trace = log;
         using var http = LrclibLyrics.CreateHttp();
@@ -112,7 +112,7 @@ internal sealed class LivePlayback : IDisposable
                     if (lookup is null && song is null && now >= retryAt)
                     {
                         lookupCancellation = CancellationTokenSource.CreateLinkedTokenSource(stop);
-                        lookup = LoadSongAsync(lyrics, localLyrics, reading.Track, seed, look, lookupCancellation.Token);
+                        lookup = LoadSongAsync(lyrics, localLyrics, reading.Track, seed, look, animation, lookupCancellation.Token);
                     }
 
                     double time = clock.At(now);
@@ -197,7 +197,7 @@ internal sealed class LivePlayback : IDisposable
     }
 
     private static async Task<ProceduralSong> LoadSongAsync(LrclibLyrics source, string localFolder, Track track,
-        uint seed, SongLook look, CancellationToken stop)
+        uint seed, SongLook look, AnimationSettings animation, CancellationToken stop)
     {
         string name = string.Concat($"{track.Artist} - {track.Title}".Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c));
         string path = Path.Combine(localFolder, name + ".lrc");
@@ -216,7 +216,7 @@ internal sealed class LivePlayback : IDisposable
 
         LyricCue[] lyrics = local?.Any(cue => cue.Text.Length > 0) == true ? local : await source.FindAsync(track, stop);
         stop.ThrowIfCancellationRequested();
-        return new ProceduralSong(lyrics, track.Duration, seed, look);
+        return new ProceduralSong(lyrics, track.Duration, seed, look, animation);
     }
     private static void Trace<T>(StreamWriter? trace, T value)
     {

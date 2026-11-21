@@ -10,6 +10,27 @@ namespace Lenoz.Motion.Tests;
 public sealed class WordCompositionTests
 {
     [TestMethod]
+    public void VisualPresetChangesPreserveTimingAndLocalMotion()
+    {
+        var cues = LrcParser.Parse("[00:01.000]Eu volto devagar\n[00:04.000]");
+        var animation = AnimationSettings.Default;
+        var first = new ProceduralSong(cues, 5, 42, SongLook.Preset("ivory"), animation);
+        var second = new ProceduralSong(cues, 5, 42, SongLook.Preset("ice") with { DisplayFont = "Segoe UI" }, animation);
+        Assert.AreEqual(TimingKind.Estimated, first.TimingAt(1.6));
+        Assert.AreEqual(first.TimingAt(1.6), second.TimingAt(1.6));
+
+        var a = first.SceneAt(1.6)!;
+        var b = second.SceneAt(1.6)!;
+        for (int i = 0; i < a.Rig.Count; i++)
+            Assert.AreEqual(a.Rig.GetNode(i).MatrixAt(1.6), b.Rig.GetNode(i).MatrixAt(1.6));
+        for (int i = 0; i < a.Planes.Length; i++)
+        {
+            Assert.AreEqual(a.Planes[i].Opacity(1.6), b.Planes[i].Opacity(1.6));
+            Assert.AreEqual(a.Planes[i].Word!.TrackingAt(1.6), b.Planes[i].Word!.TrackingAt(1.6));
+        }
+    }
+
+    [TestMethod]
     public void EnhancedLrcRetainsRealWordTimesRepeatedLinesAndOffset()
     {
         var cues = LrcParser.Parse("[offset:+100]\n[00:02.000][00:08.000]<00:02.000>Eu <00:02.250>volto<00:03.100>");
@@ -39,8 +60,8 @@ public sealed class WordCompositionTests
     public void WordRevealWaitsForVocalAndPhraseTrackingKeepsOpeningDuringReading()
     {
         var original = LrcParser.Parse("[00:01.0]<00:01.0>Eu <00:02.0>volto <00:03.0>devagar<00:04.0>\n[00:05.0]");
-        var look = SongLook.Preset("white") with { Reveal = "all" };
-        var song = new ProceduralSong(original, 5.3, 42, look);
+        var song = new ProceduralSong(original, 5.3, 42, SongLook.Preset("white"),
+            AnimationSettings.Default with { Reveal = "all" });
         ScenePlane plane = song.SceneAt(0)!.Planes.Single(plane => plane.Text?.Text == "volto");
         Assert.AreEqual(0, plane.Opacity(1.999));
         Assert.IsGreaterThan(0, plane.Opacity(2.01));

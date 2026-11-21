@@ -79,7 +79,7 @@ internal sealed partial class StageRenderer
         {
             Vector2 half = HalfViewport;
             float feather = _overlay?.Feather ?? 0;
-            float margin = feather + Math.Clamp(half.Y * 0.10f, 5, 22) + 4 + phrase.Style.GlowRadius;
+            float margin = feather + Math.Clamp(half.Y * 0.10f, 5, 22) + 4 + PhraseStyle.GlowReserve;
             phrase.Safe = Vector2.Max(new Vector2(4), half - new Vector2(margin));
             if (_fits.TryGetValue(phrase.Style, out PhraseFit previous))
             {

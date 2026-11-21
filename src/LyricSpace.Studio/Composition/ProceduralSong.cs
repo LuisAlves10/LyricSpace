@@ -12,9 +12,10 @@ internal sealed class ProceduralSong
     private readonly double[] _visibleUntil;
     private readonly Sequence[] _scenes;
 
-    public ProceduralSong(LyricCue[] lyrics, double duration, uint seed, SongLook? look = null)
+    public ProceduralSong(LyricCue[] lyrics, double duration, uint seed, SongLook? look = null, AnimationSettings? animation = null)
     {
         look ??= SongLook.Default;
+        animation ??= AnimationSettings.Default;
         var cues = lyrics.Where(cue => cue.Seconds < duration).ToArray();
         _starts = cues.Select(cue => cue.Seconds).ToArray();
         _visibleUntil = new double[cues.Length];
@@ -33,8 +34,8 @@ internal sealed class ProceduralSong
             MotionFamily? previous = i > 0 ? profiles[i - 1].Family : null;
             var profile = profiles[i] = GestureProfile.Choose(ref rng, previous, lengths[i]);
             double spacing = i == 0 ? 0 : _starts[i] - _starts[i - 1];
-            float strength = look.Motion * (float)Math.Clamp(spacing, 0.07, 1);
-            float z = i == 0 ? 0 : centers[i - 1].Z - (float)Math.Min(spacing * 1.55, 3.3) * look.Motion;
+            float strength = animation.Motion * (float)Math.Clamp(spacing, 0.07, 1);
+            float z = i == 0 ? 0 : centers[i - 1].Z - (float)Math.Min(spacing * 1.55, 3.3) * animation.Motion;
             centers[i] = new Vector3(profile.Direction * profile.Reach * 0.65f * strength,
                 (rng.Next() - 0.5f) * 0.7f * strength, z);
         }
@@ -42,10 +43,10 @@ internal sealed class ProceduralSong
         ScalarCurve x = Travel(centers.Select(c => c.X).ToArray(), false);
         ScalarCurve y = Travel(centers.Select(c => c.Y).ToArray(), false);
         ScalarCurve zTravel = Travel(centers.Select(c => c.Z).ToArray(), true);
-        var depthAttack = Pulse(lengths, profiles, p => (p.Depth * -0.46 * look.Motion, p.Attack * 0.46, 0.63, p.Out, p.In));
-        var depthRecovery = Pulse(lengths, profiles, p => (p.Depth * 0.33 * look.Motion, p.Counter, 0.91, p.In, p.Out));
-        var roll = Pulse(lengths, profiles, p => (p.Direction * p.Rotation * 3.6 * look.Motion, p.Attack, 0.94, p.Out, p.In));
-        var zoom = Pulse(lengths, profiles, p => (-56 * p.Depth * look.Motion, p.Counter, 0.93, p.Out, p.In), 1370);
+        var depthAttack = Pulse(lengths, profiles, p => (p.Depth * -0.46 * animation.Motion, p.Attack * 0.46, 0.63, p.Out, p.In));
+        var depthRecovery = Pulse(lengths, profiles, p => (p.Depth * 0.33 * animation.Motion, p.Counter, 0.91, p.In, p.Out));
+        var roll = Pulse(lengths, profiles, p => (p.Direction * p.Rotation * 3.6 * animation.Motion, p.Attack, 0.94, p.Out, p.In));
+        var zoom = Pulse(lengths, profiles, p => (-56 * p.Depth * animation.Motion, p.Counter, 0.93, p.Out, p.In), 1370);
         var temperature = new ScalarCurve(new Key(0, 0));
         var camera = new RigNode[]
         {
@@ -65,7 +66,7 @@ internal sealed class ProceduralSong
             }
 
             double nextLength = i + 1 < cues.Length && cues[i + 1].Text.Length > 0 ? lengths[i + 1] : 0;
-            var group = BuildGroup(i, cues[i], centers[i], profiles[i], look, palette, lengths[i], nextLength, ref rng);
+            var group = BuildGroup(i, cues[i], centers[i], profiles[i], look, animation, palette, lengths[i], nextLength, ref rng);
             groups[i] = group;
             _visibleUntil[i] = group.End;
         }
@@ -164,7 +165,7 @@ internal sealed class ProceduralSong
     }
 
     private static Phrase BuildGroup(int index, LyricCue cue, Vector3 origin, GestureProfile g,
-        SongLook look, WordPalette palette, double interval, double nextInterval, ref LayoutRandom rng)
+        SongLook look, AnimationSettings animation, WordPalette palette, double interval, double nextInterval, ref LayoutRandom rng)
     {
         string id = $"cue.{index}";
         double start = cue.Seconds;
@@ -189,12 +190,12 @@ internal sealed class ProceduralSong
         var frameIn = Progress(start, readStart, 0.23, 0.77);
         var frameOut = Progress(readEnd, exit + tail, 0.65, 0.35);
         var style = new PhraseStyle(index, g.Family, start, readStart, readEnd, exit + tail, frameIn, frameOut,
-            g.Direction * g.Stagger * look.Motion, g.Width, look.Tracking, look.GlowRadius);
+            g.Direction * g.Stagger * animation.Motion, g.Width, animation.Tracking);
         var entry = Progress(start, start + attack, g.Out, g.In);
         var departure = Progress(departureAt, exit + tail, g.In, g.Out);
         var countermove = Progress(start + attack * g.Counter, start + Math.Min(life * 0.79, 1.55), 0.48, g.In);
         var fadeIn = Progress(start, start + Math.Min(attack * 0.70, 0.20), 0.24, 0.73);
-        float energy = look.Motion * (float)Math.Clamp(life / 1.12, 0.08, 1);
+        float energy = animation.Motion * (float)Math.Clamp(life / 1.12, 0.08, 1);
 
         Vector3 enter = g.Family switch
         {
@@ -225,7 +226,7 @@ internal sealed class ProceduralSong
             return new Pose(shift * p, -enterRotation * (0.48f * p));
         });
 
-        var lyrics = WordTiming.Resolve(cue, exit, look.EstimateWords);
+        var lyrics = WordTiming.Resolve(cue, exit, animation.EstimateWords);
         int hero = Array.IndexOf(lyrics, lyrics.MaxBy(w => new StringInfo(w.Text).LengthInTextElements));
         var words = new WordPlane[lyrics.Length];
         for (int i = 0; i < words.Length; i++)
@@ -233,8 +234,8 @@ internal sealed class ProceduralSong
             var word = lyrics[i];
             bool lead = i == hero;
             float n = rng.Next();
-            bool pop = word.Timing != TimingKind.Line && (look.Reveal == "all"
-                || (look.Reveal == "some" && n < 0.30f && (i != 0 || lyrics.Length == 1)));
+            bool pop = word.Timing != TimingKind.Line && (animation.Reveal == "all"
+                || (animation.Reveal == "some" && n < 0.30f && (i != 0 || lyrics.Length == 1)));
             double span = word.End - word.Start;
             double localAttack = Math.Min(0.15, span * 0.48);
             var vocalIn = Progress(word.Start, word.Start + Math.Min(0.060, span * 0.30), 0.22, 0.78);
@@ -243,7 +244,7 @@ internal sealed class ProceduralSong
             var landing = ScalarCurve.Between(word.Start, word.Start + localAttack, 0, 1,
                 new Ease(0.25), new Ease(0.72, 0.21 / localAttack));
             var punch = new ArrivalOscillation(landing, 0.012, 3.2, 9.2, Sequence.ReferenceFps);
-            var visual = new WordStyle(style, word, lead, pop, palette, vocalIn, vocalOut, look.ActiveTracking, look.Glow, look.AmbientGlow);
+            var visual = new WordStyle(style, word, lead, pop, palette, vocalIn, vocalOut, animation.ActiveTracking, look.Glow, look.AmbientGlow, look.GlowRadius);
             Vector3 pose = new(0, (rng.Next() - 0.5f) * 0.08f * energy,
                 (lead ? 0.21f : (rng.Next() - 0.5f) * 0.34f) * energy);
             Vector3 tilt = new((rng.Next() - 0.5f) * 7, (rng.Next() - 0.5f) * (lead ? 18 : 11),

@@ -15,11 +15,6 @@ internal sealed record SongLook
     public float Glow { get; init; } = 0.62f;
     public float AmbientGlow { get; init; } = 0.04f;
     public float GlowRadius { get; init; } = 10;
-    public float Tracking { get; init; } = 0.024f;
-    public float ActiveTracking { get; init; } = 0.012f;
-    public float Motion { get; init; } = 1;
-    public bool EstimateWords { get; init; }
-    public string Reveal { get; init; } = "some";
 
     public static SongLook Default { get; } = new();
     [System.Text.Json.Serialization.JsonIgnore]
@@ -49,13 +44,9 @@ internal sealed record SongLook
         Check(look.Glow, 0, 1.5f, nameof(Glow));
         Check(look.AmbientGlow, 0, 0.4f, nameof(AmbientGlow));
         Check(look.GlowRadius, 2, 22, nameof(GlowRadius));
-        Check(look.Tracking, 0, 0.055f, nameof(Tracking));
-        Check(look.ActiveTracking, 0, 0.035f, nameof(ActiveTracking));
-        Check(look.Motion, 0, 1.6f, nameof(Motion));
-        if (string.IsNullOrWhiteSpace(look.DisplayFont) || string.IsNullOrWhiteSpace(look.BodyFont)
-            || look.Reveal is not ("none" or "some" or "all"))
+        if (string.IsNullOrWhiteSpace(look.DisplayFont) || string.IsNullOrWhiteSpace(look.BodyFont))
         {
-            throw new ArgumentException("Informe nomes de fontes e use Reveal igual a none, some ou all.");
+            throw new ArgumentException("Informe nomes de fontes.");
         }
 
         return look;

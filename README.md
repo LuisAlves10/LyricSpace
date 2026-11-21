@@ -26,7 +26,21 @@ O baseline visual oficial é `visual-baseline-v1`, sobre o código restaurado de
 
 Abra **Aparência** no menu do ícone do LyricSpace na bandeja. Escolha **Marfim e âmbar**, **Branco com glow** ou **Azul monocromático**. **Editar arquivo personalizado** cria o arquivo com os valores da aparência atual e abre o editor. Após salvar, escolha **Aplicar arquivo personalizado** no mesmo menu.
 
-O arquivo fica em **%LOCALAPPDATA%\LyricSpace\appearance.json**. As chaves Base, Secondary e Accent recebem cores em #RRGGBB. DisplayFont e BodyFont recebem nomes de fontes do Windows. Glow e AmbientGlow controlam o halo ativo e de fundo, e GlowRadius ajusta o raio em pixels. Tracking e ActiveTracking medem a expansão em em. Motion controla a intensidade do movimento. Reveal aceita none, some ou all para definir quais palavras aguardam o início do vocal.
+O arquivo **%LOCALAPPDATA%\LyricSpace\appearance.json** controla cores, fontes e glow. Use `Base`, `Secondary` e `Accent` em `#RRGGBB`, fontes do Windows em `DisplayFont` e `BodyFont`, e `Glow`, `AmbientGlow` e `GlowRadius` para o halo.
+
+Para ajustar movimento e sincronização, crie **%LOCALAPPDATA%\LyricSpace\animation.json** e reinicie o overlay. Os campos omitidos conservam os valores da baseline, compartilhados por todos os presets.
+
+```json
+{
+  "EstimateWords": true,
+  "Reveal": "some",
+  "Motion": 1.08,
+  "Tracking": 0.034,
+  "ActiveTracking": 0.017
+}
+```
+
+`Reveal` aceita `none`, `some` ou `all`. `Tracking` e `ActiveTracking` medem a expansão em ems. Se um perfil antigo inclui essas chaves, transfira as preferências de movimento que quiser manter para `animation.json`. O JSON original completo permanece versionado como referência do teste aprovado.
 
 O destaque preciso usa os tempos internos de Enhanced LRC. Para aplicar uma letra local no overlay, salve o arquivo em **%LOCALAPPDATA%\LyricSpace\lyrics**, com nome no formato **Artista - Título.lrc**, seguindo os metadados da sessão do Windows. Caracteres inválidos de nome de arquivo viram sublinhado. A letra é lida na próxima carga da faixa.
 
@@ -36,7 +50,7 @@ Exemplo curto de Enhanced LRC com três palavras e o fim da última:
 [00:02.000]<00:02.000>Eu <00:02.250>volto <00:02.770>devagar<00:03.950>
 ```
 
-Quando a fonte fornece apenas tempos de linha, a frase continua sincronizada por linha. Para experimentar destaque estimado por palavra, defina **"EstimateWords": true** no arquivo personalizado. A bandeja identifica esse modo. O cálculo distribui o tempo da linha segundo o comprimento dos termos e a pontuação.
+Quando a fonte fornece apenas tempos de linha, o destaque por palavra usa a estimativa ativada por padrão. A bandeja identifica esse modo. O cálculo distribui o tempo da linha segundo o comprimento dos termos e a pontuação.
 
 ## Abrir o Studio
 
