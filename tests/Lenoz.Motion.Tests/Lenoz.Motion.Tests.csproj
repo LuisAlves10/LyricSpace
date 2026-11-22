@@ -8,6 +8,7 @@
     <Compile Include="../../src/LyricSpace.Studio/Overlay/OverlayPlacement.cs" Link="OverlayPlacement.cs" />
     <Compile Include="../../src/LyricSpace.Studio/Composition/SongLook.cs" />
     <Compile Include="../../src/LyricSpace.Studio/Composition/AnimationSettings.cs" />
+    <None Include="../../src/LyricSpace.Studio/white-estimated.json" Link="white-estimated.json" CopyToOutputDirectory="PreserveNewest" />
     <Compile Include="../../src/LyricSpace.Studio/Composition/WordStyle.cs" />
     <Compile Include="../../src/LyricSpace.Studio/Rendering/OpticalFraming.cs" />
     <Compile Include="../../src/LyricSpace.Studio/Composition/Sequence.cs" />

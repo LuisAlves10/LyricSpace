@@ -10,12 +10,18 @@ namespace Lenoz.Motion.Tests;
 public sealed class WordCompositionTests
 {
     [TestMethod]
-    public void VisualPresetChangesPreserveTimingAndLocalMotion()
+    [DataRow("ivory")]
+    [DataRow("white")]
+    [DataRow("ice")]
+    [DataRow("visual-baseline-v1")]
+    public void VisualPresetChangesPreserveTimingAndLocalMotion(string preset)
     {
         var cues = LrcParser.Parse("[00:01.000]Eu volto devagar\n[00:04.000]");
         var animation = AnimationSettings.Default;
-        var first = new ProceduralSong(cues, 5, 42, SongLook.Preset("ivory"), animation);
-        var second = new ProceduralSong(cues, 5, 42, SongLook.Preset("ice") with { DisplayFont = "Segoe UI" }, animation);
+        var baseline = SongLook.Read(Path.Combine(AppContext.BaseDirectory, "white-estimated.json"));
+        var look = preset == "visual-baseline-v1" ? baseline : SongLook.Preset(preset);
+        var first = new ProceduralSong(cues, 5, 42, baseline, animation);
+        var second = new ProceduralSong(cues, 5, 42, look with { DisplayFont = "Segoe UI" }, animation);
         Assert.AreEqual(TimingKind.Estimated, first.TimingAt(1.6));
         Assert.AreEqual(first.TimingAt(1.6), second.TimingAt(1.6));
 

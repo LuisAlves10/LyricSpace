@@ -1,5 +1,11 @@
 # Status
 
+## Baseline visual v2
+
+A build aprovada naquela tarde rodava com `--appearance white-estimated.json`. O perfil ativava a estimativa por palavra e definia `Reveal` como `some` e `Motion` como `1.08`. O estado da execução também dependia do arquivo de aparência passado na linha de comando. Reabrir o mesmo código com um preset comum desativava a estimativa, pois esses valores ainda pertenciam ao perfil visual. Isso explica por que os blocos continuavam sincronizados enquanto as entradas por palavra desapareciam.
+
+A tag `visual-baseline-v1` preserva o perfil completo. A v2 consolida o uso dos mesmos valores de animação e sincronização em todos os presets. O overlay carrega as preferências de movimento de `animation.json` e as de aparência de `appearance.json`. A confirmação incluiu 76 quadros e um trace idênticos aos da build original com o perfil aprovado, além de testes de timing, opacidade, tracking e matrizes locais para os quatro presets.
+
 ## Linguagem visual e leitura
 
 - **Overlay real.** Gravação contínua de 21 s a 60 FPS de *I Was Never There* tocando no Spotify desktop. A região de 806 × 454 px ficou sobre uma janela de teste clara e escura. O preset branco monocromático usou o modo estimado. O caminho de Enhanced LRC foi verificado separadamente com uma letra de teste e timestamps explícitos.
